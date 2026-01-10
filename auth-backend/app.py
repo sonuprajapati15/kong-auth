@@ -1,17 +1,22 @@
 import os
-from flask import Flask, request, jsonify
 
-from kong_client import (
-    create_consumer,
-    create_jwt_credential,
-    get_jwt_secret,
-    create_api_key,
-    KongError,
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+
+from kong_client import KongError
+from auth_service import (
+    signup_user,
+    login_user,
+    logout_user,
+    generate_apikey_for_user,
+    ValidationError,
+    ConflictError,
+    NotFoundError,
+    PersistenceError,
 )
-from token_service import create_access_token
-from user_store import create_user, get_user, verify_password
 
 app = Flask(__name__)
+CORS(app)
 
 
 def _json(required_fields):
@@ -24,107 +29,69 @@ def _json(required_fields):
 
 @app.post("/auth/signup")
 def signup():
-    """
-    Public endpoint.
-    - Creates Kong consumer
-    - Creates Kong JWT credential (secret generated & stored by Kong)
-    - Stores mapping user <-> kong consumer id <-> jwt credential id
-    """
-    data, err, code = _json(["userId", "password"])
+    data, err, code = _json(["email", "password"])
     if err:
         return err, code
-
-    user_id = data["userId"]
-    password = data["password"]
-
-    if get_user(user_id):
-        return jsonify({"error": "User already exists"}), 409
-
     try:
-        consumer = create_consumer(user_id)
-        jwt_cred = create_jwt_credential(user_id)
+        resp = signup_user(email=data["email"], password_b64=data["password"], role="user")
+        return jsonify(resp), 201
+    except ConflictError as e:
+        return jsonify({"error": str(e)}), 409
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    except PersistenceError as e:
+        return jsonify({"error": str(e)}), 500
     except KongError as e:
         return jsonify({"error": str(e)}), 502
-
-    try:
-        create_user(
-            user_id=user_id,
-            password=password,
-            kong_consumer_id=consumer["id"],
-            jwt_credential_id=jwt_cred["id"],
-        )
-    except Exception as e:
-        # In real system: consider compensating action (delete consumer/cred) or mark as pending.
-        return jsonify({"error": f"Failed to persist user: {e}"}), 500
-
-    return jsonify(
-        {
-            "userId": user_id,
-            "kongConsumerId": consumer["id"],
-            "jwtCredentialId": jwt_cred["id"],
-            "note": "JWT secret is generated and stored by Kong; Auth Service stores only IDs.",
-        }
-    ), 201
 
 
 @app.post("/auth/login")
 def login():
-    """
-    Public endpoint.
-    - Authenticates user
-    - Fetches HS256 secret from Kong using jwt_credential_id
-    - Issues JWT with iss=userId
-    """
-    data, err, code = _json(["userId", "password"])
+    data, err, code = _json(["email", "password"])
     if err:
         return err, code
 
-    user_id = data["userId"]
-    password = data["password"]
-
-    user = get_user(user_id)
-    if not user or not verify_password(user, password):
-        return jsonify({"error": "Invalid credentials"}), 401
-
     try:
-        secret = get_jwt_secret(user.jwt_credential_id)
+        resp = login_user(email=data["email"], password_b64=data["password"])
+        return jsonify(resp), 200
+    except ValidationError as e:
+        msg = str(e)
+        if msg == "Invalid credentials Or User Not Exist":
+            return jsonify({"error": msg}), 401
+        return jsonify({"error": msg}), 400
     except KongError as e:
         return jsonify({"error": str(e)}), 502
 
-    token = create_access_token(user_id=user.user_id, secret=secret)
-    return jsonify({"access_token": token, "token_type": "Bearer"}), 200
+
+@app.post("/auth/logout")
+def logout():
+    data, err, code = _json(["email"])  # keeping your existing payload requirement
+    if err:
+        return err, code
+    try:
+        resp = logout_user(email=data["email"])
+        return jsonify(resp), 200
+    except NotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), 400
+    except KongError as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.post("/auth/apikey")
 def generate_apikey():
-    """
-    Public OR admin-protected endpoint (your choice).
-    Creates an API key in Kong for selective APIs that do NOT use JWT.
-    """
     data, err, code = _json(["userId"])
     if err:
         return err, code
-
-    user_id = data["userId"]
-    user = get_user(user_id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-
     usage_scope = (request.get_json(silent=True) or {}).get("usageScope", "partner_api")
-
     try:
-        cred = create_api_key(user_id)
+        resp = generate_apikey_for_user(user_id=data["userId"], usage_scope=usage_scope)
+        return jsonify(resp), 201
+    except NotFoundError as e:
+        return jsonify({"error": str(e)}), 404
     except KongError as e:
         return jsonify({"error": str(e)}), 502
-
-    return jsonify(
-        {
-            "userId": user_id,
-            "api_key": cred["key"],
-            "consumer_id": cred["consumer"]["id"] if isinstance(cred.get("consumer"), dict) else user.kong_consumer_id,
-            "usage_scope": usage_scope,
-        }
-    ), 201
 
 
 @app.get("/auth/healthz")

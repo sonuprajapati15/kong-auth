@@ -87,3 +87,17 @@ def create_api_key(user_id: str, key: Optional[str] = None) -> Dict[str, Any]:
     )
     _raise_for_status(r)
     return r.json()
+
+
+def delete_consumer(userId: str):
+    return requests.delete(
+        f"{KONG_ADMIN_URL}/consumers/{userId}",
+        timeout=20,
+    ).raise_for_status()
+
+
+def delete_jwt_credential(userId: str, jwt_credential_id: str):
+    return requests.delete(
+        f"{KONG_ADMIN_URL}/consumers/{userId}/jwt/{jwt_credential_id}",
+        timeout=20,
+    ).raise_for_status()

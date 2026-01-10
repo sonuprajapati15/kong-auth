@@ -1,0 +1,148 @@
+.appShell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    background: #f6f7fb;
+}
+
+.sidebar {
+    background: #f1f5f9;
+    border-right: 1px solid rgba(148, 163, 184, 0.35);
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 200px;
+    padding-left: 20px;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+}
+
+.brand__logo {
+    width: 50px;
+    height: 50px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: #0f172a;
+    color: white;
+    font-weight: 900;
+}
+
+.brand__name {
+    font-weight: 900;
+    color: #0f172a;
+}
+
+.navGroup {
+    display: grid;
+    gap: 8px;
+}
+
+.navGroup__title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #94a3b8;
+    text-transform: uppercase;
+    padding: 10px 10px 0;
+}
+
+.navItem {
+    display: block;
+    padding: 10px 12px;
+    border-radius: 12px;
+    color: #334155;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.navItem:hover {
+    background: rgba(255, 255, 255, 0.75);
+}
+
+.navItem--active {
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.spacer {
+    flex: 1;
+}
+
+.logoutBtn {
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    background: rgba(239, 68, 68, 0.08);
+    color: #7f1d1d;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.userChip {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.userChip__avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: #0f172a;
+    color: #fff;
+    font-weight: 900;
+}
+
+.userChip__meta {
+    overflow: hidden;
+}
+.userChip__name {
+    font-weight: 900;
+    color: #0f172a;
+    line-height: 1.1;
+}
+.userChip__email {
+    font-size: 12px;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.content {
+    padding: 3px;
+}
+
+.contentInner {
+    background: #fff;
+    border-radius: 18px;
+    min-height: calc(100vh - 10px);
+    min-width: calc(100vh - 30px);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+}
+
+@media (max-width: 780px) {
+    .appShell {
+        grid-template-columns: 1fr;
+    }
+    .sidebar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+}

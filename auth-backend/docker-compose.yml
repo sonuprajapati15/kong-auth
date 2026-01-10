@@ -2,6 +2,18 @@ version: "3.9"
 
 services:
   # 1) Kong datastore (Postgres)
+  auth_mongodb:
+    image: mongo:6
+    restart: always
+    container_name: auth_mongodb
+    ports:
+      - "27019:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: my_user
+      MONGO_INITDB_ROOT_PASSWORD: mypassword
+    volumes:
+      - auth_mongodb:/data/db
+
   kong-db:
     image: postgres:12
     container_name: kong-db
@@ -22,7 +34,7 @@ services:
       - kong-net
 
   # 2) Redis used ONLY for rate limiting
-  redis:
+  kong-redis:
     image: redis:7-alpine
     container_name: kong-redis
     command: ["redis-server", "--appendonly", "no"]
@@ -63,7 +75,7 @@ services:
         condition: service_healthy
       kong-migrations:
         condition: service_completed_successfully
-      redis:
+      kong-redis:
         condition: service_healthy
     environment:
       KONG_DATABASE: postgres
@@ -125,10 +137,11 @@ services:
   # 7) Auth service (depends on Kong Admin API)
   auth-service:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./Dockerfile
     container_name: auth-service
     environment:
+      MONGO_URI: "mongodb://my_user:mypassword@auth_mongodb:27017/"
       KONG_ADMIN_URL: "http://kong:8001"
       JWT_EXP_SECONDS: "86400"
       HOST: "0.0.0.0"
@@ -143,6 +156,7 @@ services:
 
 volumes:
   kong_db_data:
+  auth_mongodb:
 
 networks:
   kong-net:

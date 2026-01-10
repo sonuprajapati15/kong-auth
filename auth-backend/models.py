@@ -4,7 +4,8 @@ from typing import Optional
 
 @dataclass
 class User:
-    user_id: str
+    email: str
+    role: str
     password_hash: str
     kong_consumer_id: str
     jwt_credential_id: str
