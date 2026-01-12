@@ -1,4 +1,6 @@
 import os
+import random
+
 import requests
 from typing import Any, Dict, Optional
 
@@ -77,8 +79,7 @@ def create_api_key(user_id: str, key: Optional[str] = None) -> Dict[str, Any]:
     If `key` is None, Kong generates one.
     """
     payload = {}
-    if key:
-        payload["key"] = key
+    payload["key"] = "".join(random.choices("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=32))
 
     r = requests.post(
         f"{KONG_ADMIN_URL}/consumers/{user_id}/key-auth",
