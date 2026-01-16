@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import "../css/RuleBuilder.css";
-import { createRuleApi, getRuleApi, updateRuleApi, deleteRuleApi } from "../../../../services/rulesApi";
+import "./css/RuleBuilder.css";
+import { createRuleApi, getRuleApi, updateRuleApi, deleteRuleApi } from "../../services/rulesApi.js";
 
 const FIELD_OPTIONS = ["Status", "Priority", "Category", "Created Date", "Contract address"];
 const OP_OPTIONS = ["equals", "not equals", "contains", "is greater than", "is before", "is after"];

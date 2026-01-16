@@ -8,11 +8,11 @@ import Fields from "./pages/Home/tabs/page/Fields.jsx";
 import Webhooks from "./pages/Home/tabs/page/Webhooks.jsx";
 import Actions from "./pages/Home/tabs/page/Actions.jsx";
 import Groups from "./pages/Home/tabs/page/Groups.jsx";
-import GroupDetails from "./pages/Home/tabs/page/GroupDetails.jsx";
+import GroupDetails from "./pages/Groups/GroupDetails.jsx";
 import Rules from "./pages/Home/tabs/page/Rules.jsx";
 import Analytics from "./pages/Home/tabs/page/Analytics.jsx";
 import UserChipLayout from "./pages/Home/tabs/page/UserChipLayout.jsx";
-import RuleBuilder from "./pages/Home/tabs/page/RuleBuilder.jsx"
+import RuleBuilder from "./pages/rules/RuleBuilder.jsx"
 import EmailServerConfig from "./pages/Home/tabs/page/EmailServerConfig.jsx";
 
 export default function App() {

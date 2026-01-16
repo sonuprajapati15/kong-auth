@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import "../css/GroupDetails.css";
-import { createGroupApi, getGroupApi } from "../../../../services/groupApi";
+import "./css/GroupDetails.css";
+import { createGroupApi, getGroupApi } from "../../services/groupApi.js";
 
 function formatDate(iso) {
     if (!iso) return "—";
