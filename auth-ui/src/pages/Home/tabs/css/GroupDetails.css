@@ -1,0 +1,135 @@
+.gdPage { padding: 16px; }
+
+.gdHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.gdCrumb { font-size: 12px; color: #64748b; font-weight: 800; }
+.linkBtn {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    color: #2563eb;
+    font-weight: 900;
+    padding: 0;
+}
+
+.gdTitle { font-size: 22px; font-weight: 950; color: #0f172a; }
+.gdSub { font-size: 13px; color: #64748b; }
+
+.gdGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-items: start;
+}
+
+.gdFull { grid-column: 1 / -1; }
+
+.card {
+    background: #fff;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+}
+
+.cardHead {
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.cardTitle { font-weight: 950; }
+.cardMeta { font-size: 12px; color: #64748b; font-weight: 900; }
+
+.panelBody { padding: 12px; display: grid; gap: 12px; }
+.info { padding: 12px; display: grid; gap: 8px; font-size: 13px; }
+
+.pillWrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.pill {
+    display: inline-flex; align-items: center;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 900;
+    background: rgba(148, 163, 184, 0.18);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    color: #334155;
+}
+
+.field { display: grid; gap: 8px; }
+.label { font-size: 12px; font-weight: 900; color: #334155; }
+
+.input {
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    padding: 0 12px;
+    outline: none;
+}
+.input:focus {
+    border-color: rgba(59, 130, 246, 0.55);
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+}
+
+.table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.table thead th {
+    text-align: left;
+    font-size: 12px;
+    color: #64748b;
+    padding: 12px;
+    background: #f8fafc;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    white-space: nowrap;
+}
+.table tbody td {
+    padding: 12px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    font-size: 13px;
+    color: #0f172a;
+}
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
+.nameMain { font-weight: 950; }
+
+.iconBtn {
+    height: 34px;
+    width: 42px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: #fff;
+    cursor: pointer;
+}
+.iconBtn:hover { background: #f8fafc; }
+
+.btnPrimary, .btnSecondary {
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 12px;
+    font-weight: 950;
+    border: 0;
+    cursor: pointer;
+}
+.btnPrimary { background: #2563eb; color: #fff; }
+.btnSecondary { background: #f1f5f9; color: #0f172a; border: 1px solid rgba(148, 163, 184, 0.35); }
+
+.error {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: #7f1d1d;
+    padding: 10px 12px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+
+.empty { padding: 14px; color: #64748b; }
+
+@media (max-width: 1100px) {
+    .gdGrid { grid-template-columns: 1fr; }
+    .gdFull { grid-column: auto; }
+}

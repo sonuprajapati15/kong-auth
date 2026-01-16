@@ -1,61 +1,51 @@
-import { useEffect, useMemo, useState } from "react";
+import {useEffect, useMemo, useState} from "react";
 import "../css/Groups.css";
-import {
-    createGroupApi,
-    deleteGroupApi,
-    listGroupsApi,
-    updateGroupRulesApi
-} from "../../../../services/groupApi.js";
+import {createGroupApi, deleteGroupApi, listGroupsApi, updateGroupApi} from "../../../../services/groupApi";
+import { useNavigate } from "react-router-dom";
 
-function buildTree(groups) {
-    const byId = new Map(groups.map((g) => [g.id, { ...g, children: [] }]));
-    const roots = [];
-
-    for (const g of byId.values()) {
-        const pid = g.parent_group_id ?? g.parentGroupId ?? null;
-        if (!pid) {
-            roots.push(g);
-        } else {
-            const parent = byId.get(pid);
-            if (parent) parent.children.push(g);
-            else roots.push(g); // fallback if parent missing
-        }
+function formatDate(iso) {
+    if (!iso) return "—";
+    try {
+        return new Date(iso).toLocaleString();
+    } catch {
+        return iso;
     }
-
-    // sort optional
-    roots.sort((a, b) => String(a.group_name ?? a.groupName).localeCompare(String(b.group_name ?? b.groupName)));
-    for (const r of roots) {
-        r.children.sort((a, b) => String(a.group_name ?? a.groupName).localeCompare(String(b.group_name ?? b.groupName)));
-    }
-
-    return roots;
 }
 
-function groupName(g) {
-    return g?.group_name ?? g?.groupName ?? "—";
+function isParent(g) {
+    // API doesn't include parent_group_id in sample GET response,
+    // so we infer parent if depth === 0 OR if there are child ids.
+    return g.depth === 0;
 }
 
 export default function Groups() {
+    const nav = useNavigate();
+
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState("");
 
-    const [rawGroups, setRawGroups] = useState([]);
-    const tree = useMemo(() => buildTree(rawGroups), [rawGroups]);
+    const [groups, setGroups] = useState([]);
+    const [search, setSearch] = useState("");
 
-    const [selectedGroupId, setSelectedGroupId] = useState(null);
-
-    const selectedGroup = useMemo(
-        () => rawGroups.find((g) => g.id === selectedGroupId) || null,
-        [rawGroups, selectedGroupId]
-    );
-
-    // right-side form
-    const [panelMode, setPanelMode] = useState("view"); // view | createParent | createChild | editRules
+    const [panelMode, setPanelMode] = useState("view"); // view | create | editRules | viewDetails
     const panelOpen = panelMode !== "view";
 
-    const [newGroupName, setNewGroupName] = useState("");
-    const [rulesText, setRulesText] = useState(""); // comma-separated rule ids
+    const [selectedId, setSelectedId] = useState(null);
+    const selected = useMemo(() => groups.find((g) => g.id === selectedId) || null, [groups, selectedId]);
+
+    // create form
+    const [newName, setNewName] = useState("");
+    const [newParentId, setNewParentId] = useState(""); // optional
+
+    // edit rules form
+    const [rulesText, setRulesText] = useState("");
+
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return groups;
+        return groups.filter((g) => (g.group_name || "").toLowerCase().includes(q) || (g.id || "").toLowerCase().includes(q));
+    }, [groups, search]);
 
     async function refresh() {
         setErr("");
@@ -63,12 +53,8 @@ export default function Groups() {
         try {
             const data = await listGroupsApi();
             const list = Array.isArray(data) ? data : data?.data ?? [];
-            setRawGroups(list);
-
-            // auto select first root
-            if (!selectedGroupId && list.length) {
-                setSelectedGroupId(list[0].id);
-            }
+            setGroups(list);
+            setSelectedId((prev) => (list.some((x) => x.id === prev) ? prev : null));
         } catch (e) {
             setErr(e?.response?.data?.message || e.message || "Failed to load groups");
         } finally {
@@ -78,51 +64,46 @@ export default function Groups() {
 
     useEffect(() => {
         refresh();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-
-    function openCreateParent() {
-        setPanelMode("createParent");
-        setNewGroupName("");
-    }
-
-    function openCreateChild() {
-        if (!selectedGroupId) return;
-        setPanelMode("createChild");
-        setNewGroupName("");
-    }
-
-    function openEditRules() {
-        if (!selectedGroup) return;
-        setPanelMode("editRules");
-        const ids = selectedGroup.rules_ids ?? selectedGroup.rulesIds ?? [];
-        setRulesText(Array.isArray(ids) ? ids.join(", ") : "");
-    }
 
     function closePanel() {
         setPanelMode("view");
-        setNewGroupName("");
+        setSelectedId(null);
+        setNewName("");
+        setNewParentId("");
         setRulesText("");
         setErr("");
+    }
+
+    function openCreate() {
+        setPanelMode("create");
+        setSelectedId(null);
+        setNewName("");
+        setNewParentId("");
+    }
+
+    function openDetails(g) {
+        setSelectedId(g.id);
+        setPanelMode("viewDetails");
+    }
+
+    function openEditRules(g) {
+        setSelectedId(g.id);
+        setPanelMode("editRules");
+        setRulesText((g.rules_ids || []).join(", "));
     }
 
     async function onCreate() {
         setErr("");
         setSaving(true);
         try {
-            if (!newGroupName.trim()) throw new Error("Group name is required");
-
-            if (panelMode === "createParent") {
-                await createGroupApi({ group_name: newGroupName.trim() });
-            } else if (panelMode === "createChild") {
-                // child group must be attached to selected parent.
-                // If selected group is itself a child, you might want to attach to its parent instead — confirm desired behavior.
-                await createGroupApi({
-                    group_name: newGroupName.trim(),
-                    parent_group_id: selectedGroupId
-                });
+            if (!newName.trim()) {
+                throw new Error("Group name is required");
             }
+            const payload = {group_name: newName.trim()};
+            if (newParentId.trim()) payload.parent_group_id = newParentId.trim();
 
+            await createGroupApi(payload);
             await refresh();
             closePanel();
         } catch (e) {
@@ -136,18 +117,15 @@ export default function Groups() {
         setErr("");
         setSaving(true);
         try {
-            if (!selectedGroupId) throw new Error("Select a group first");
-
-            const payload = {
-                id: selectedGroupId,
-                groupName: groupName(selectedGroup),
+            if (!selected) throw new Error("Select a group");
+            await updateGroupApi({
+                id: selected.id,
+                groupName: selected.group_name, // backend expects groupName
                 rules_ids: rulesText
                     .split(",")
                     .map((s) => s.trim())
                     .filter(Boolean)
-            };
-
-            await updateGroupRulesApi(payload);
+            });
             await refresh();
             closePanel();
         } catch (e) {
@@ -157,17 +135,16 @@ export default function Groups() {
         }
     }
 
-    async function onDeleteGroup() {
-        if (!selectedGroupId) return;
-        const ok = confirm("Delete this group?");
+    async function onDelete(g) {
+        const ok = confirm(`Delete group "${g.group_name}"?`);
         if (!ok) return;
 
         setErr("");
         setSaving(true);
         try {
-            await deleteGroupApi(selectedGroupId);
-            setSelectedGroupId(null);
+            await deleteGroupApi(g.id);
             await refresh();
+            closePanel();
         } catch (e) {
             setErr(e?.response?.data?.message || e.message || "Delete failed");
         } finally {
@@ -176,163 +153,178 @@ export default function Groups() {
     }
 
     return (
-        <div className="grPage">
-            {/* LEFT: group tree */}
-            <aside className="grLeft">
-                <div className="grLeftHead">
-                    <div className="grLeftTitle">Groups</div>
-                    <button className="btnPrimary" onClick={openCreateParent} disabled={loading || saving}>
-                        + Create
-                    </button>
+        <div className="agPage">
+            <div className="agHeader">
+                <div>
+                    <div className="agCrumb">Incident Management &nbsp;›&nbsp;Groups</div>
+                    <div className="agTitle" style={{paddingTop: "20px"}}>Groups</div>
                 </div>
 
-                {loading ? (
-                    <div className="empty">Loading…</div>
-                ) : (
-                    <div className="tree">
-                        {tree.map((p) => (
-                            <div key={p.id} className="treeBlock">
-                                <button
-                                    className={`treeItem ${p.id === selectedGroupId ? "treeItem--active" : ""}`}
-                                    onClick={() => setSelectedGroupId(p.id)}
-                                >
-                                    <div className="treeItem__name">{groupName(p)}</div>
-                                    <div className="treeItem__sub">Parent</div>
-                                </button>
+                <div className="agHeaderRight">
+                    <input
+                        className="agSearch"
+                        placeholder="Search Group"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                    />
+                    <button className="btnPrimary" onClick={openCreate} disabled={loading || saving}>
+                        Create Group
+                    </button>
+                </div>
+            </div>
 
-                                {p.children?.length ? (
-                                    <div className="treeChildren">
-                                        {p.children.map((c) => (
+            {err ? <div className="error">{err}</div> : null}
+
+            <div className={`agGrid ${panelOpen ? "" : "agGrid--single"}`}>
+                <section className="card">
+                    <div className="cardHead">
+                        <div className="cardTitle">All Groups</div>
+                        <div className="cardMeta">{filtered.length} items</div>
+                    </div>
+
+                    {loading ? (
+                        <div className="empty">Loading…</div>
+                    ) : filtered.length === 0 ? (
+                        <div className="empty">No groups found.</div>
+                    ) : (
+                        <table className="table">
+                            <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Group ID</th>
+                                <th>Created At</th>
+                                <th>Updated At</th>
+                                <th>Child Groups</th>
+                                <th>Rules</th>
+                                <th style={{width: 170}}>Actions</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {filtered.map((g) => (
+                                <tr key={g.id} className={g.id === selectedId ? "rowActive" : ""}
+                                    onClick={() => setSelectedId(g.id)}>
+                                    <td>
+                                        <div className="nameCell">
+                                            <div className="nameMain">{g.group_name}</div>
+                                            <div className="nameSub">{isParent(g) ? "Parent" : `Depth ${g.depth}`}</div>
+                                        </div>
+                                    </td>
+                                    <td className="mono">{g.id}</td>
+                                    <td>{formatDate(g.created_at)}</td>
+                                    <td>{formatDate(g.updated_at)}</td>
+                                    <td>{(g.child_group_ids || []).length}</td>
+                                    <td>{(g.rules_ids || []).length}</td>
+                                    <td>
+                                        <div className="actions">
                                             <button
-                                                key={c.id}
-                                                className={`treeItem treeItem--child ${c.id === selectedGroupId ? "treeItem--active" : ""}`}
-                                                onClick={() => setSelectedGroupId(c.id)}
+                                                className="iconBtn"
+                                                title="View"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    nav(`/home/groupDetails/${g.id}`);
+                                                }}
                                             >
-                                                <div className="treeItem__name">{groupName(c)}</div>
-                                                <div className="treeItem__sub">Child</div>
+                                                👁
                                             </button>
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        ))}
-                    </div>
-                )}
+                                            <button
+                                                className="iconBtn iconBtn--danger"
+                                                title="Delete"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onDelete(g);
+                                                }}
+                                            >
+                                                🗑
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    )}
 
-                <div className="grLeftFooter">
-                    <button className="btnSecondary" onClick={refresh} disabled={loading || saving}>
-                        Refresh
-                    </button>
-                </div>
-            </aside>
-
-            {/* RIGHT: rules + actions */}
-            <section className="grRight">
-                <div className="grHeader">
-                    <div>
-                        <div className="crumb">Rules</div>
-                        <div className="title">Group: {groupName(selectedGroup)}</div>
-                        <div className="subtitle">
-                            {selectedGroup?.parent_group_id ? "Child group" : "Parent group"} • ID:{" "}
-                            <span className="mono">{selectedGroup?.id || "—"}</span>
-                        </div>
-                    </div>
-
-                    <div className="grHeaderRight">
-                        <button className="btnSecondary" onClick={openCreateChild} disabled={loading || saving || !selectedGroupId}>
-                            + Add child
-                        </button>
-                        <button className="btnSecondary" onClick={openEditRules} disabled={loading || saving || !selectedGroupId}>
-                            Edit rules
-                        </button>
-                        <button className="btnDanger" onClick={onDeleteGroup} disabled={loading || saving || !selectedGroupId}>
-                            Delete
+                    <div className="tableFooter">
+                        <div className="muted">Showing {filtered.length} groups</div>
+                        <button className="btnSecondary" onClick={refresh} disabled={loading || saving}>
+                            Refresh
                         </button>
                     </div>
-                </div>
+                </section>
 
-                {err ? <div className="error">{err}</div> : null}
-
-                <div className={`grGrid ${panelOpen ? "" : "grGrid--single"}`}>
-                    {/* Rules list */}
-                    <div className="card">
+                {panelOpen ? (
+                    <aside className="card">
                         <div className="cardHead">
-                            <div className="cardTitle">Rules attached</div>
-                            <div className="cardMeta">
-                                {(selectedGroup?.rules_ids?.length ?? selectedGroup?.rulesIds?.length ?? 0) || 0} rules
+                            <div className="cardTitle">
+                                {panelMode === "create" ? "Create Group" : panelMode === "editRules" ? "Edit Rules" : "Group Details"}
                             </div>
+                            <button className="btnSecondary" onClick={closePanel} disabled={saving}>
+                                Close
+                            </button>
                         </div>
 
-                        <div className="list">
-                            {(selectedGroup?.rules_ids ?? selectedGroup?.rulesIds ?? []).length === 0 ? (
-                                <div className="empty">No rules ids attached yet.</div>
-                            ) : (
-                                (selectedGroup?.rules_ids ?? selectedGroup?.rulesIds ?? []).map((rid) => (
-                                    <div key={rid} className="listItem">
-                                        <div className="mono">{rid}</div>
-                                        <span className="pill">Rule</span>
+                        <div className="panelBody">
+                            {panelMode === "create" ? (
+                                <>
+                                    <label className="field">
+                                        <span className="label">Group name</span>
+                                        <input className="input" value={newName}
+                                               onChange={(e) => setNewName(e.target.value)}/>
+                                    </label>
+                                    <button className="btnPrimary" onClick={onCreate} disabled={saving}>
+                                        {saving ? "Creating..." : "Create"}
+                                    </button>
+                                </>
+                            ) : null}
+
+                            {panelMode === "editRules" ? (
+                                <>
+                                    <div className="muted">
+                                        Updating rules for: <b>{selected?.group_name}</b>
                                     </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
 
-                    {/* Panel (create child / create parent / edit rules) */}
-                    {panelOpen ? (
-                        <aside className="card">
-                            <div className="cardHead">
-                                <div className="cardTitle">
-                                    {panelMode === "createParent"
-                                        ? "Create parent group"
-                                        : panelMode === "createChild"
-                                            ? "Create child group"
-                                            : "Update rules"}
+                                    <label className="field">
+                                        <span className="label">rules_ids (comma separated)</span>
+                                        <textarea
+                                            className="textarea"
+                                            rows={8}
+                                            value={rulesText}
+                                            onChange={(e) => setRulesText(e.target.value)}
+                                            placeholder="ruleId1, ruleId2"
+                                        />
+                                    </label>
+
+                                    <button className="btnPrimary" onClick={onUpdateRules} disabled={saving}>
+                                        {saving ? "Updating..." : "Update"}
+                                    </button>
+                                </>
+                            ) : null}
+
+                            {panelMode === "viewDetails" ? (
+                                <div className="details">
+                                    <div><b>Name:</b> {selected?.group_name}</div>
+                                    <div><b>ID:</b> <span className="mono">{selected?.id}</span></div>
+                                    <div><b>Created:</b> {formatDate(selected?.created_at)} by {selected?.created_by}
+                                    </div>
+                                    <div><b>Updated:</b> {formatDate(selected?.updated_at)} by {selected?.updated_by}
+                                    </div>
+                                    <div><b>Depth:</b> {selected?.depth}</div>
+                                    <div><b>Child groups:</b> {(selected?.child_group_ids || []).length}</div>
+                                    <div><b>Rules:</b> {(selected?.rules_ids || []).length}</div>
+
+                                    <div className="detailsList">
+                                        {(selected?.rules_names || []).length ? (
+                                            selected.rules_names.map((n) => <div key={n} className="pill">{n}</div>)
+                                        ) : (
+                                            <div className="muted">No rule names</div>
+                                        )}
+                                    </div>
                                 </div>
-                                <button className="btnSecondary" onClick={closePanel} disabled={saving}>
-                                    Close
-                                </button>
-                            </div>
-
-                            <div className="panelBody">
-                                {panelMode === "editRules" ? (
-                                    <>
-                                        <label className="field">
-                                            <span className="label">Rules IDs (comma separated)</span>
-                                            <textarea
-                                                className="textarea"
-                                                rows={6}
-                                                value={rulesText}
-                                                onChange={(e) => setRulesText(e.target.value)}
-                                                placeholder="ruleId1, ruleId2, ruleId3"
-                                            />
-                                        </label>
-
-                                        <button className="btnPrimary" onClick={onUpdateRules} disabled={saving}>
-                                            {saving ? "Updating..." : "Update"}
-                                        </button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <label className="field">
-                                            <span className="label">Group name</span>
-                                            <input
-                                                className="input"
-                                                value={newGroupName}
-                                                onChange={(e) => setNewGroupName(e.target.value)}
-                                                placeholder="Main Group"
-                                            />
-                                        </label>
-
-                                        <button className="btnPrimary" onClick={onCreate} disabled={saving}>
-                                            {saving ? "Creating..." : "Create"}
-                                        </button>
-                                    </>
-                                )}
-                            </div>
-                        </aside>
-                    ) : null}
-                </div>
-            </section>
+                            ) : null}
+                        </div>
+                    </aside>
+                ) : null}
+            </div>
         </div>
     );
 }

@@ -2,6 +2,7 @@ import {NavLink, Outlet, useNavigate} from "react-router-dom";
 import {clearAuth, getUser} from "../../config/auth";
 import {logOutApi} from "../../services/authApi.js";
 import "./HomeLayout.css";
+import Webhooks from "./tabs/page/Webhooks.jsx";
 
 function Item({to, label}) {
     return (
@@ -39,18 +40,20 @@ export default function HomeLayout() {
                 </div>
 
                 <div className="navGroup">
-                    <div className="navGroup__title" style={{fontSize: "0.85em"}}>Transactions</div>
+                    <div className="navGroup__title" style={{fontSize: "0.85em"}}>External Actions</div>
                     <div style={{display: "flex", paddingLeft: "10px", flexDirection: "column", gap: "0.2px"}}>
-                        <Item to="/home/payments" label={<span style={{fontSize: "0.75em"}}>Payments</span>}/>
+                        <Item to="/home/webhooks" label={<span style={{fontSize: "0.75em"}}>Webhooks</span>}/>
+                        <Item to="/home/email-server" label={<span style={{fontSize: "0.75em"}}>Email Server Config</span>}/>
                     </div>
                 </div>
 
                 <div className="navGroup">
                     <div className="navGroup__title" style={{paddingLeft: "10px", fontSize: "0.85em"}}>Rule Engine</div>
                     <div style={{display: "flex", paddingLeft: "10px", flexDirection: "column", gap: "0.2px"}}>
-                        <Item to="/home/actions" label={<span style={{fontSize: "0.75em"}}>Actions</span>}/>
                         <Item to="/home/fields" label={<span style={{fontSize: "0.75em"}}>Fields</span>}/>
-                        <Item to="/home/groups" label={<span style={{fontSize: "0.75em"}}>Groups And Rules</span>}/>
+                        <Item to="/home/actions" label={<span style={{fontSize: "0.75em"}}>Actions</span>}/>
+                        <Item to="/home/groups" label={<span style={{fontSize: "0.75em"}}>Groups</span>}/>
+                        <Item to="/home/rules" label={<span style={{fontSize: "0.75em"}}>Rules</span>}/>
                     </div>
                 </div>
                 <div className="spacer"/>

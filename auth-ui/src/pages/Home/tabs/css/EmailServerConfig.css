@@ -1,0 +1,170 @@
+.escPage { padding: 16px; }
+
+.escHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.escTitle { font-size: 22px; font-weight: 950; color: #0f172a; }
+.escSub { font-size: 13px; color: #64748b; margin-top: 6px; }
+
+.escHeaderRight { display: flex; gap: 10px; align-items: center; }
+
+.escSearch {
+    height: 40px;
+    width: min(320px, 45vw);
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    padding: 0 12px;
+    outline: none;
+}
+.escSearch:focus {
+    border-color: rgba(59, 130, 246, 0.55);
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+}
+
+.card {
+    background: #fff;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+}
+
+.panelCard { margin-top: 14px; }
+
+.cardHead {
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    gap: 10px;
+}
+
+.cardTitle { font-weight: 950; }
+.cardMeta { font-size: 12px; color: #64748b; font-weight: 900; }
+
+.panelHeadRight { display: flex; gap: 10px; align-items: center; }
+
+.table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.table thead th {
+    text-align: left;
+    font-size: 12px;
+    color: #64748b;
+    padding: 12px;
+    background: #f8fafc;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    white-space: nowrap;
+}
+.table tbody td {
+    padding: 12px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    font-size: 13px;
+    color: #0f172a;
+    vertical-align: middle;
+}
+.table tbody tr:hover { background: rgba(241, 245, 249, 0.7); cursor: pointer; }
+
+.rowActive { background: rgba(59, 130, 246, 0.08); }
+.nameMain { font-weight: 950; }
+
+.actions { display: flex; gap: 8px; align-items: center; }
+
+.iconBtn {
+    height: 34px;
+    width: 40px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: #fff;
+    cursor: pointer;
+}
+.iconBtn:hover { background: #f8fafc; }
+.iconBtn--danger {
+    border-color: rgba(239, 68, 68, 0.25);
+    background: rgba(239, 68, 68, 0.08);
+}
+
+.panelBody {
+    padding: 12px;
+    display: grid;
+    gap: 12px;
+    max-width: 900px;
+}
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.field { display: grid; gap: 8px; }
+.label { font-size: 12px; font-weight: 900; color: #334155; }
+
+.input {
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    padding: 0 12px;
+    outline: none;
+}
+.input:focus {
+    border-color: rgba(59, 130, 246, 0.55);
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+}
+
+.pwRow { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+
+.envBoxWrap { margin-top: 6px; }
+.envLabel { font-size: 12px; font-weight: 900; color: #334155; margin-bottom: 8px; }
+
+.envBox {
+    margin: 0;
+    padding: 12px;
+    border-radius: 12px;
+    background: #0b1220;
+    color: #e2e8f0;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.btnPrimary, .btnSecondary, .btnDanger {
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 12px;
+    font-weight: 950;
+    border: 0;
+    cursor: pointer;
+}
+
+.btnPrimary { background: #2563eb; color: #fff; }
+.btnSecondary { background: #f1f5f9; color: #0f172a; border: 1px solid rgba(148, 163, 184, 0.35); }
+.btnDanger { background: rgba(239, 68, 68, 0.12); color: #7f1d1d; border: 1px solid rgba(239, 68, 68, 0.25); }
+
+.info {
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    color: #0f172a;
+    padding: 10px 12px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.error {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: #7f1d1d;
+    padding: 10px 12px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.empty { padding: 14px; color: #64748b; }
+
+@media (max-width: 1100px) {
+    .row2 { grid-template-columns: 1fr; }
+    .escHeader { flex-direction: column; align-items: stretch; }
+    .escHeaderRight { justify-content: space-between; }
+}

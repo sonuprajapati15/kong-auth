@@ -4,3 +4,4 @@ PyJWT==2.8.0
 werkzeug==3.0.1
 flask_cors
 pymongo
+gevent
