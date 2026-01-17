@@ -12,7 +12,7 @@ import GroupDetails from "./pages/Groups/GroupDetails.jsx";
 import Rules from "./pages/Home/tabs/page/Rules.jsx";
 import Analytics from "./pages/Home/tabs/page/Analytics.jsx";
 import UserChipLayout from "./pages/Home/tabs/page/UserChipLayout.jsx";
-import RuleBuilder from "./pages/rules/RuleBuilder.jsx"
+import RuleBuilder from "./pages/Rules/RuleBuilder.jsx"
 import EmailServerConfig from "./pages/Home/tabs/page/EmailServerConfig.jsx";
 
 export default function App() {

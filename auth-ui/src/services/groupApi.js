@@ -17,6 +17,11 @@ export async function getGroupApi(id) {
     return res.data;
 }
 
+export async function getAllGroupsByName(name) {
+    const res = await rule_server.get(`${BASE}/byName/${name}`);
+    return res.data;
+}
+
 
 export async function updateGroupApi({ id, groupName, rules_ids }) {
     // as per your postman

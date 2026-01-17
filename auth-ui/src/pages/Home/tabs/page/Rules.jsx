@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "../css/Rules.css";
 import { deleteRuleApi, listRulesApi, updateRuleApi } from "../../../../services/rulesApi";
+import { listGroupsApi } from "../../../../services/groupApi.js";
 import { useNavigate } from "react-router-dom";
 
 function formatDate(iso) {
