@@ -1,50 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "../css/Webhooks.css";
-
-const STORAGE_KEY = "webhooks_v2";
-
-function nowIso() {
-    return new Date().toISOString();
-}
-
-function loadAll() {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-function saveAll(list) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
-
-function makeEmpty() {
-    return {
-        id: crypto?.randomUUID?.() || `wh_${Date.now()}`,
-        name: "",
-        url: "",
-        method: "POST",
-        timeout_ms: 10000,
-
-        auth_type: "NONE", // NONE | API_KEY | BASIC | JWT
-        auth_api_key_header: "Authorization",
-        auth_api_key_value: "",
-        auth_username: "",
-        auth_password: "",
-        auth_jwt_token: "",
-
-        body_fields: [{ key: "rule_id", value: "{{rule.id}}" }],
-        enabled: true,
-        description: "",
-
-        created_at: nowIso(),
-        updated_at: nowIso()
-    };
-}
+import {
+    createWebhookApi,
+    deleteWebhookApi,
+    listWebhooksApi,
+    updateWebhookApi
+} from "../../../../services/webhookApi";
 
 const AUTH_TYPES = [
     { value: "NONE", label: "None" },
@@ -55,8 +16,49 @@ const AUTH_TYPES = [
 
 const HTTP_METHODS = ["POST", "PUT", "PATCH"];
 
+function formatDate(iso) {
+    if (!iso) return "—";
+    try {
+        return new Date(iso).toLocaleString();
+    } catch {
+        return iso;
+    }
+}
+
+function makeEmpty() {
+    return {
+        id: "",
+        name: "",
+        url: "",
+        method: "POST",
+        timeout_ms: 5000,
+
+        authType: "NONE",
+        authApikeyHeader: "Authorization",
+        authApiKeyValue: "",
+        authUsername: "",
+        authPassword: "",
+        authJwtToken: "",
+
+        bodyFields: [{ key: "rule_id", value: "{{rule.id}}" }],
+        enabled: true,
+        description: ""
+    };
+}
+
+function mapRow(w) {
+    return {
+        ...w,
+        createdDateTime: w.createdDateTime || w.created_date_time || w.created_at,
+        updatedDateTime: w.updatedDateTime || w.updated_date_time || w.updated_at
+    };
+}
+
 export default function Webhooks() {
-    const [rows, setRows] = useState(() => loadAll());
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    const [rows, setRows] = useState([]);
     const [search, setSearch] = useState("");
 
     // view | create | edit
@@ -64,7 +66,6 @@ export default function Webhooks() {
     const panelOpen = mode !== "view";
 
     const [selectedId, setSelectedId] = useState(null);
-
     const [form, setForm] = useState(makeEmpty());
     const [showSecret, setShowSecret] = useState(false);
 
@@ -83,6 +84,27 @@ export default function Webhooks() {
         });
     }, [rows, search]);
 
+    async function refresh() {
+        setErr("");
+        setMsg("");
+        setLoading(true);
+        try {
+            const data = await listWebhooksApi();
+            const list = Array.isArray(data) ? data : data?.data ?? [];
+            const mapped = list.map(mapRow);
+            setRows(mapped);
+            setSelectedId((prev) => (mapped.some((x) => x.id === prev) ? prev : null));
+        } catch (e) {
+            setErr(e?.response?.data?.message || e.message || "Failed to load webhooks");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        refresh();
+    }, []);
+
     function setField(key, value) {
         setForm((p) => ({ ...p, [key]: value }));
     }
@@ -90,21 +112,21 @@ export default function Webhooks() {
     function setBodyField(idx, patch) {
         setForm((p) => ({
             ...p,
-            body_fields: (p.body_fields || []).map((f, i) => (i === idx ? { ...f, ...patch } : f))
+            bodyFields: (p.bodyFields || []).map((f, i) => (i === idx ? { ...f, ...patch } : f))
         }));
     }
 
     function addBodyField() {
         setForm((p) => ({
             ...p,
-            body_fields: [...(p.body_fields || []), { key: "", value: "" }]
+            bodyFields: [...(p.bodyFields || []), { key: "", value: "" }]
         }));
     }
 
     function removeBodyField(idx) {
         setForm((p) => ({
             ...p,
-            body_fields: (p.body_fields || []).filter((_, i) => i !== idx)
+            bodyFields: (p.bodyFields || []).filter((_, i) => i !== idx)
         }));
     }
 
@@ -121,15 +143,28 @@ export default function Webhooks() {
         setMsg("");
         setMode("edit"); // same panel for view/edit
         setSelectedId(r.id);
-        setForm({ ...r });
+        setForm({
+            id: r.id || "",
+            name: r.name || "",
+            url: r.url || "",
+            method: r.method || "POST",
+            timeout_ms: r.timeout_ms ?? 5000,
+
+            authType: r.authType || "NONE",
+            authApikeyHeader: r.authApikeyHeader || "Authorization",
+            authApiKeyValue: r.authApiKeyValue || "",
+            authUsername: r.authUsername || "",
+            authPassword: r.authPassword || "",
+            authJwtToken: r.authJwtToken || "",
+
+            bodyFields: Array.isArray(r.bodyFields) && r.bodyFields.length ? r.bodyFields : [{ key: "rule_id", value: "{{rule.id}}" }],
+            enabled: Boolean(r.enabled),
+            description: r.description || ""
+        });
     }
 
     function openEdit(r) {
-        setErr("");
-        setMsg("");
-        setMode("edit");
-        setSelectedId(r.id);
-        setForm({ ...r });
+        openView(r);
     }
 
     function closePanel() {
@@ -139,27 +174,26 @@ export default function Webhooks() {
     }
 
     function validate(f) {
+        if (!f.id?.trim() && mode === "create") return "Webhook id is required";
         if (!f.name?.trim()) return "Webhook name is required";
         if (!f.url?.trim()) return "Webhook URL is required";
         if (!/^https:\/\//i.test(f.url.trim())) return "Webhook URL must start with https://";
         if (!HTTP_METHODS.includes(f.method)) return "Invalid HTTP method";
-        if (!f.timeout_ms || Number.isNaN(Number(f.timeout_ms))) return "Timeout must be a number";
+        if (!f.timeout_ms || Number.isNaN(Number(f.timeout_ms))) return "timeout_ms must be a number";
 
-        // auth validation
-        if (f.auth_type === "API_KEY") {
-            if (!f.auth_api_key_header?.trim()) return "API Key header is required";
-            if (!f.auth_api_key_value?.trim()) return "API Key value is required";
+        if (f.authType === "API_KEY") {
+            if (!f.authApikeyHeader?.trim()) return "authApikeyHeader is required";
+            if (!f.authApiKeyValue?.trim()) return "authApiKeyValue is required";
         }
-        if (f.auth_type === "BASIC") {
-            if (!f.auth_username?.trim()) return "Username is required";
-            if (!f.auth_password?.trim()) return "Password is required";
+        if (f.authType === "BASIC") {
+            if (!f.authUsername?.trim()) return "authUsername is required";
+            if (!f.authPassword?.trim()) return "authPassword is required";
         }
-        if (f.auth_type === "JWT") {
-            if (!f.auth_jwt_token?.trim()) return "JWT token is required";
+        if (f.authType === "JWT") {
+            if (!f.authJwtToken?.trim()) return "authJwtToken is required";
         }
 
-        // body fields
-        const fields = f.body_fields || [];
+        const fields = f.bodyFields || [];
         if (fields.length === 0) return "Add at least one body field";
         for (const bf of fields) {
             if (!bf.key?.trim()) return "Body field key cannot be empty";
@@ -171,17 +205,17 @@ export default function Webhooks() {
     function buildPreviewRequest(f) {
         const headers = { "Content-Type": "application/json" };
 
-        if (f.auth_type === "API_KEY") {
-            headers[f.auth_api_key_header || "Authorization"] = f.auth_api_key_value || "";
-        } else if (f.auth_type === "BASIC") {
-            const token = btoa(`${f.auth_username || ""}:${f.auth_password || ""}`);
+        if (f.authType === "API_KEY") {
+            headers[f.authApikeyHeader || "Authorization"] = f.authApiKeyValue || "";
+        } else if (f.authType === "BASIC") {
+            const token = btoa(`${f.authUsername || ""}:${f.authPassword || ""}`);
             headers["Authorization"] = `Basic ${token}`;
-        } else if (f.auth_type === "JWT") {
-            headers["Authorization"] = `Bearer ${f.auth_jwt_token || ""}`;
+        } else if (f.authType === "JWT") {
+            headers["Authorization"] = `Bearer ${f.authJwtToken || ""}`;
         }
 
         const body = {};
-        (f.body_fields || []).forEach((x) => {
+        (f.bodyFields || []).forEach((x) => {
             if (!x.key) return;
             body[x.key] = x.value ?? "";
         });
@@ -189,7 +223,7 @@ export default function Webhooks() {
         return { method: f.method, url: f.url, headers, body, timeout_ms: Number(f.timeout_ms || 0) };
     }
 
-    function onSave() {
+    async function onSave() {
         setErr("");
         setMsg("");
 
@@ -199,46 +233,95 @@ export default function Webhooks() {
             return;
         }
 
-        const next = { ...form, updated_at: nowIso() };
+        setSaving(true);
+        try {
+            const payload = {
+                id: form.id.trim(),
+                name: form.name.trim(),
+                url: form.url.trim(),
+                method: form.method,
+                timeout_ms: Number(form.timeout_ms),
 
-        if (mode === "create") {
-            const updated = [next, ...rows];
-            setRows(updated);
-            saveAll(updated);
-            setMsg("Created.");
+                authType: form.authType,
+                authApikeyHeader: form.authApikeyHeader,
+                authApiKeyValue: form.authApiKeyValue,
+                authUsername: form.authUsername,
+                authPassword: form.authPassword,
+                authJwtToken: form.authJwtToken,
+
+                bodyFields: (form.bodyFields || []).map((x) => ({ key: String(x.key || "").trim(), value: x.value })),
+                enabled: Boolean(form.enabled),
+                description: form.description || ""
+            };
+
+            if (mode === "create") {
+                await createWebhookApi(payload);
+                setMsg("Created.");
+            } else {
+                await updateWebhookApi(payload);
+                setMsg("Updated.");
+            }
+
             closePanel();
-            return;
+            await refresh();
+        } catch (e) {
+            setErr(e?.response?.data?.message || e.message || "Save failed");
+        } finally {
+            setSaving(false);
         }
-
-        const updated = rows.map((r) => (r.id === next.id ? next : r));
-        setRows(updated);
-        saveAll(updated);
-        setMsg("Updated.");
-        closePanel();
     }
 
-    function onDelete(id) {
+    async function onDelete(id) {
         const r = rows.find((x) => x.id === id);
         const ok = confirm(`Delete webhook "${r?.name || id}"?`);
         if (!ok) return;
 
         setErr("");
         setMsg("");
-
-        const updated = rows.filter((x) => x.id !== id);
-        setRows(updated);
-        saveAll(updated);
-
-        if (selectedId === id) closePanel();
-        setMsg("Deleted.");
+        setSaving(true);
+        try {
+            await deleteWebhookApi(id);
+            setMsg("Deleted.");
+            closePanel();
+            await refresh();
+        } catch (e) {
+            setErr(e?.response?.data?.message || e.message || "Delete failed");
+        } finally {
+            setSaving(false);
+        }
     }
 
-    function onToggleEnabled(r) {
-        const next = { ...r, enabled: !r.enabled, updated_at: nowIso() };
-        const updated = rows.map((x) => (x.id === r.id ? next : x));
-        setRows(updated);
-        saveAll(updated);
-        setMsg(`Webhook ${next.enabled ? "enabled" : "disabled"}.`);
+    async function onToggleEnabled(r) {
+        setErr("");
+        setMsg("");
+        setSaving(true);
+        try {
+            // update by sending full payload (API design is PUT with full object)
+            await updateWebhookApi({
+                id: r.id,
+                name: r.name,
+                url: r.url,
+                method: r.method,
+                timeout_ms: Number(r.timeout_ms),
+
+                authType: r.authType || "NONE",
+                authApikeyHeader: r.authApikeyHeader || "Authorization",
+                authApiKeyValue: r.authApiKeyValue || "",
+                authUsername: r.authUsername || "",
+                authPassword: r.authPassword || "",
+                authJwtToken: r.authJwtToken || "",
+
+                bodyFields: r.bodyFields || [],
+                enabled: !r.enabled,
+                description: r.description || ""
+            });
+            setMsg(`Webhook ${!r.enabled ? "enabled" : "disabled"}.`);
+            await refresh();
+        } catch (e) {
+            setErr(e?.response?.data?.message || e.message || "Toggle failed");
+        } finally {
+            setSaving(false);
+        }
     }
 
     function copyJson(r) {
@@ -246,7 +329,7 @@ export default function Webhooks() {
         setMsg("Copied webhook JSON to clipboard.");
     }
 
-    function testRequestPreview() {
+    function copyCurlPreview() {
         const req = buildPreviewRequest(form);
         navigator.clipboard.writeText(
             `curl -X ${req.method} '${req.url}' \\\n` +
@@ -263,9 +346,7 @@ export default function Webhooks() {
             <div className="whHeader">
                 <div>
                     <div className="whTitle">Webhooks</div>
-                    <div className="whSub">
-                        Sends REST HTTPS requests on rule execution. Supports API Key, Basic, or JWT auth.
-                    </div>
+                    <div className="whSub">Sends REST HTTPS requests on rule execution. Supports API Key, Basic, or JWT auth.</div>
                 </div>
 
                 <div className="whHeaderRight">
@@ -275,7 +356,10 @@ export default function Webhooks() {
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
-                    <button className="btnPrimary" onClick={openCreate}>
+                    <button className="btnSecondary" onClick={refresh} disabled={loading || saving}>
+                        Refresh
+                    </button>
+                    <button className="btnPrimary" onClick={openCreate} disabled={saving}>
                         Create Webhook
                     </button>
                 </div>
@@ -290,7 +374,9 @@ export default function Webhooks() {
                     <div className="cardMeta">{filtered.length} items</div>
                 </div>
 
-                {filtered.length === 0 ? (
+                {loading ? (
+                    <div className="empty">Loading…</div>
+                ) : filtered.length === 0 ? (
                     <div className="empty">No webhooks.</div>
                 ) : (
                     <table className="table">
@@ -313,13 +399,13 @@ export default function Webhooks() {
                             >
                                 <td className="nameMain">{r.name}</td>
                                 <td className="mono">{r.url}</td>
-                                <td>{AUTH_TYPES.find((x) => x.value === r.auth_type)?.label || r.auth_type}</td>
+                                <td>{AUTH_TYPES.find((x) => x.value === r.authType)?.label || r.authType}</td>
                                 <td>
                     <span className={`pill ${r.enabled ? "pill--ok" : ""}`}>
                       {r.enabled ? "ENABLED" : "DISABLED"}
                     </span>
                                 </td>
-                                <td>{new Date(r.updated_at).toLocaleString()}</td>
+                                <td>{formatDate(r.updatedDateTime)}</td>
                                 <td>
                                     <div className="actions">
                                         <button
@@ -349,6 +435,7 @@ export default function Webhooks() {
                                                 e.stopPropagation();
                                                 onToggleEnabled(r);
                                             }}
+                                            disabled={saving}
                                         >
                                             <span className="toggleDot" />
                                         </button>
@@ -369,6 +456,7 @@ export default function Webhooks() {
                                                 e.stopPropagation();
                                                 onDelete(r.id);
                                             }}
+                                            disabled={saving}
                                         >
                                             🗑
                                         </button>
@@ -381,25 +469,24 @@ export default function Webhooks() {
                 )}
             </div>
 
-            {/* Form visible on create/edit/view */}
             {panelOpen ? (
                 <div className="card panelCard">
                     <div className="cardHead">
                         <div className="cardTitle">{mode === "create" ? "Create Webhook" : "View / Edit Webhook"}</div>
                         <div className="panelHeadRight">
                             {mode !== "create" ? (
-                                <button className="btnDanger" onClick={() => onDelete(form.id)}>
+                                <button className="btnDanger" onClick={() => onDelete(form.id)} disabled={saving}>
                                     Delete
                                 </button>
                             ) : null}
-                            <button className="btnSecondary" onClick={testRequestPreview}>
+                            <button className="btnSecondary" onClick={copyCurlPreview} disabled={saving}>
                                 Copy curl
                             </button>
-                            <button className="btnSecondary" onClick={closePanel}>
+                            <button className="btnSecondary" onClick={closePanel} disabled={saving}>
                                 Close
                             </button>
-                            <button className="btnPrimary" onClick={onSave}>
-                                Save
+                            <button className="btnPrimary" onClick={onSave} disabled={saving}>
+                                {saving ? "Saving..." : "Save"}
                             </button>
                         </div>
                     </div>
@@ -407,22 +494,47 @@ export default function Webhooks() {
                     <div className="panelBody">
                         <div className="row2">
                             <label className="field">
+                                <span className="label">Webhook id</span>
+                                <input
+                                    className="input"
+                                    value={form.id}
+                                    onChange={(e) => setField("id", e.target.value)}
+                                    placeholder="webhook-001"
+                                    disabled={mode !== "create"}
+                                />
+                            </label>
+
+                            <label className="field">
                                 <span className="label">Webhook name</span>
                                 <input
                                     className="input"
                                     value={form.name}
                                     onChange={(e) => setField("name", e.target.value)}
-                                    placeholder="Rule Execution Webhook"
+                                    placeholder="Sample Webhook"
                                 />
                             </label>
+                        </div>
 
+                        <div className="row2">
                             <label className="field">
                                 <span className="label">HTTP Method</span>
                                 <select className="input" value={form.method} onChange={(e) => setField("method", e.target.value)}>
                                     {HTTP_METHODS.map((m) => (
-                                        <option key={m} value={m}>{m}</option>
+                                        <option key={m} value={m}>
+                                            {m}
+                                        </option>
                                     ))}
                                 </select>
+                            </label>
+
+                            <label className="field">
+                                <span className="label">Timeout (ms)</span>
+                                <input
+                                    className="input"
+                                    value={form.timeout_ms}
+                                    onChange={(e) => setField("timeout_ms", e.target.value)}
+                                    inputMode="numeric"
+                                />
                             </label>
                         </div>
 
@@ -436,50 +548,44 @@ export default function Webhooks() {
                             />
                         </label>
 
-                        <div className="row2">
-                            <label className="field">
-                                <span className="label">Timeout (ms)</span>
-                                <input
-                                    className="input"
-                                    value={form.timeout_ms}
-                                    onChange={(e) => setField("timeout_ms", e.target.value)}
-                                    inputMode="numeric"
-                                />
-                            </label>
+                        <label className="field">
+                            <span className="label">Auth Type</span>
+                            <select className="input" value={form.authType} onChange={(e) => setField("authType", e.target.value)}>
+                                {AUTH_TYPES.map((a) => (
+                                    <option key={a.value} value={a.value}>
+                                        {a.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
 
-                            <label className="field">
-                                <span className="label">Auth Type</span>
-                                <select className="input" value={form.auth_type} onChange={(e) => setField("auth_type", e.target.value)}>
-                                    {AUTH_TYPES.map((a) => (
-                                        <option key={a.value} value={a.value}>{a.label}</option>
-                                    ))}
-                                </select>
-                            </label>
-                        </div>
-
-                        {/* AUTH CONFIG */}
-                        {form.auth_type === "API_KEY" ? (
+                        {form.authType === "API_KEY" ? (
                             <div className="row2">
                                 <label className="field">
-                                    <span className="label">API Key Header</span>
+                                    <span className="label">authApikeyHeader</span>
                                     <input
                                         className="input"
-                                        value={form.auth_api_key_header}
-                                        onChange={(e) => setField("auth_api_key_header", e.target.value)}
-                                        placeholder="Authorization"
+                                        value={form.authApikeyHeader}
+                                        onChange={(e) => setField("authApikeyHeader", e.target.value)}
+                                        placeholder="X-API-KEY"
                                     />
                                 </label>
+
                                 <label className="field">
-                                    <span className="label">API Key Value</span>
+                                    <span className="label">authApiKeyValue</span>
                                     <div className="pwRow">
                                         <input
                                             className="input"
-                                            value={form.auth_api_key_value}
-                                            onChange={(e) => setField("auth_api_key_value", e.target.value)}
+                                            value={form.authApiKeyValue}
+                                            onChange={(e) => setField("authApiKeyValue", e.target.value)}
                                             type={showSecret ? "text" : "password"}
-                                            placeholder="ApiKey xxx or Bearer xxx"
                                         />
-                                        <button className="btnSecondary" type="button" onClick={() => setShowSecret((s) => !s)} style={{ height: 40 }}>
+                                        <button
+                                            className="btnSecondary"
+                                            type="button"
+                                            onClick={() => setShowSecret((s) => !s)}
+                                            style={{ height: 40 }}
+                                        >
                                             {showSecret ? "Hide" : "Show"}
                                         </button>
                                     </div>
@@ -487,28 +593,28 @@ export default function Webhooks() {
                             </div>
                         ) : null}
 
-                        {form.auth_type === "BASIC" ? (
+                        {form.authType === "BASIC" ? (
                             <div className="row2">
                                 <label className="field">
-                                    <span className="label">Username</span>
-                                    <input
-                                        className="input"
-                                        value={form.auth_username}
-                                        onChange={(e) => setField("auth_username", e.target.value)}
-                                        placeholder="username"
-                                    />
+                                    <span className="label">authUsername</span>
+                                    <input className="input" value={form.authUsername} onChange={(e) => setField("authUsername", e.target.value)} />
                                 </label>
+
                                 <label className="field">
-                                    <span className="label">Password</span>
+                                    <span className="label">authPassword</span>
                                     <div className="pwRow">
                                         <input
                                             className="input"
-                                            value={form.auth_password}
-                                            onChange={(e) => setField("auth_password", e.target.value)}
+                                            value={form.authPassword}
+                                            onChange={(e) => setField("authPassword", e.target.value)}
                                             type={showSecret ? "text" : "password"}
-                                            placeholder="password"
                                         />
-                                        <button className="btnSecondary" type="button" onClick={() => setShowSecret((s) => !s)} style={{ height: 40 }}>
+                                        <button
+                                            className="btnSecondary"
+                                            type="button"
+                                            onClick={() => setShowSecret((s) => !s)}
+                                            style={{ height: 40 }}
+                                        >
                                             {showSecret ? "Hide" : "Show"}
                                         </button>
                                     </div>
@@ -516,25 +622,29 @@ export default function Webhooks() {
                             </div>
                         ) : null}
 
-                        {form.auth_type === "JWT" ? (
+                        {form.authType === "JWT" ? (
                             <label className="field">
-                                <span className="label">JWT Token</span>
+                                <span className="label">authJwtToken</span>
                                 <div className="pwRow">
                                     <input
                                         className="input"
-                                        value={form.auth_jwt_token}
-                                        onChange={(e) => setField("auth_jwt_token", e.target.value)}
+                                        value={form.authJwtToken}
+                                        onChange={(e) => setField("authJwtToken", e.target.value)}
                                         type={showSecret ? "text" : "password"}
-                                        placeholder="eyJhbGciOi..."
                                     />
-                                    <button className="btnSecondary" type="button" onClick={() => setShowSecret((s) => !s)} style={{ height: 40 }}>
+                                    <button
+                                        className="btnSecondary"
+                                        type="button"
+                                        onClick={() => setShowSecret((s) => !s)}
+                                        style={{ height: 40 }}
+                                    >
                                         {showSecret ? "Hide" : "Show"}
                                     </button>
                                 </div>
                             </label>
                         ) : null}
 
-                        {/* BODY FIELDS */}
+                        {/* Body fields */}
                         <div className="bodyFieldsHead">
                             <div className="bodyFieldsTitle">Body fields (JSON)</div>
                             <button className="btnSecondary" type="button" onClick={addBodyField} style={{ height: 36 }}>
@@ -549,21 +659,26 @@ export default function Webhooks() {
                                 <div />
                             </div>
 
-                            {(form.body_fields || []).map((bf, idx) => (
+                            {(form.bodyFields || []).map((bf, idx) => (
                                 <div key={idx} className="bfRow">
                                     <input
                                         className="input"
                                         value={bf.key}
                                         onChange={(e) => setBodyField(idx, { key: e.target.value })}
-                                        placeholder="field_name"
+                                        placeholder="field1"
                                     />
                                     <input
                                         className="input"
                                         value={bf.value}
                                         onChange={(e) => setBodyField(idx, { value: e.target.value })}
-                                        placeholder='{{rule.id}} or static value'
+                                        placeholder="value1"
                                     />
-                                    <button className="iconBtn iconBtn--danger" type="button" title="Remove" onClick={() => removeBodyField(idx)}>
+                                    <button
+                                        className="iconBtn iconBtn--danger"
+                                        type="button"
+                                        title="Remove"
+                                        onClick={() => removeBodyField(idx)}
+                                    >
                                         🗑
                                     </button>
                                 </div>
@@ -571,22 +686,17 @@ export default function Webhooks() {
                         </div>
 
                         <label className="checkRow">
-                            <input
-                                type="checkbox"
-                                checked={Boolean(form.enabled)}
-                                onChange={(e) => setField("enabled", e.target.checked)}
-                            />
+                            <input type="checkbox" checked={Boolean(form.enabled)} onChange={(e) => setField("enabled", e.target.checked)} />
                             <span>Enabled</span>
                         </label>
 
                         <label className="field">
-                            <span className="label">Description (optional)</span>
+                            <span className="label">Description</span>
                             <textarea
                                 className="textarea"
                                 rows={3}
                                 value={form.description}
                                 onChange={(e) => setField("description", e.target.value)}
-                                placeholder="What this webhook is used for"
                             />
                         </label>
 

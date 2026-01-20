@@ -296,9 +296,6 @@ export default function Fields() {
 
             if (!payload.name) throw new Error("Field name is required");
             if (!normalizedType) throw new Error("Field type is required");
-            if (!payload.values || payload.values.length === 0) {
-                throw new Error("At least one value is required");
-            }
             if (!payload.comment) throw new Error("Comment is required");
 
             if (mode === "create") {
@@ -467,92 +464,6 @@ export default function Fields() {
                                     </div>
                                 </div>
                             ) : null}
-
-                            {/* Values input:
-                  - DATE/TIME/DATETIME => show picker + Add button (calendar/clock)
-                  - Others => comma-separated text */}
-                            {isDate || isTime || isDateTime ? (
-                                <div className="field">
-                                    <div className="label">Values</div>
-
-                                    <div className="formRow" style={{ gap: 8 }}>
-                                        {isDate ? (
-                                            <input
-                                                className="input"
-                                                type="date"
-                                                value={toHtmlDateValue(pickerValue)}
-                                                onChange={(e) => setPickerValue(e.target.value)}
-                                            />
-                                        ) : null}
-
-                                        {isTime ? (
-                                            <input
-                                                className="input"
-                                                type="time"
-                                                step="1"
-                                                value={toHtmlTimeValue(pickerValue)}
-                                                onChange={(e) => setPickerValue(e.target.value)}
-                                            />
-                                        ) : null}
-
-                                        {isDateTime ? (
-                                            <input
-                                                className="input"
-                                                type="datetime-local"
-                                                step="1"
-                                                value={toHtmlDateTimeLocalValue(pickerValue)}
-                                                onChange={(e) => setPickerValue(e.target.value)}
-                                            />
-                                        ) : null}
-
-                                        <button
-                                            className="btnSecondary"
-                                            type="button"
-                                            onClick={addPickerValueToList}
-                                            disabled={!pickerValue}
-                                            title="Add selected value into the list"
-                                        >
-                                            Add
-                                        </button>
-                                    </div>
-
-                                    <div style={{ height: 8 }} />
-
-                                    <input
-                                        className="input"
-                                        value={valuesText}
-                                        onChange={(e) => setValuesText(e.target.value)}
-                                        placeholder={
-                                            isDate
-                                                ? "2026-01-15, 2026-01-16"
-                                                : isDateTime
-                                                    ? "2026-01-15T10:00, 2026-01-15T11:00"
-                                                    : "10:00:00, 11:30:00"
-                                        }
-                                    />
-                                    <div className="mono" style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
-                                        Tip: use the picker and click “Add” to build the comma-separated list.
-                                    </div>
-                                </div>
-                            ) : (
-                                <label className="field">
-                                    <span className="label">Values (comma separated)</span>
-                                    <input
-                                        className="input"
-                                        value={valuesText}
-                                        onChange={(e) => setValuesText(e.target.value)}
-                                        placeholder={
-                                            normalizedType === "BOOLEAN"
-                                                ? "true, false"
-                                                : normalizedType === "INT"
-                                                    ? "1, 2, 3"
-                                                    : normalizedType === "DOUBLE"
-                                                        ? "1.5, 2.75"
-                                                        : "value1, value2"
-                                        }
-                                    />
-                                </label>
-                            )}
 
                             <label className="field">
                                 <span className="label">Comment</span>

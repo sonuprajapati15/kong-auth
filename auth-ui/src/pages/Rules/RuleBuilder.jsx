@@ -6,8 +6,28 @@ import { getAllGroupsByName } from "../../services/groupApi.js";
 import { listDefaultValuesMeta } from "../../services/defaultValuesApi.js";
 import { listFieldsApi } from "../../services/fieldsApi.js";
 import { listActionsApi } from "../../services/actionsApi.js";
+import { listWebhooksApi } from "../../services/webhookApi.js";
+import { listSmtpConfigsApi } from "../../services/smtp.js";
 
-// small debounce helper
+/**
+ * Changes requested:
+ * 1) Each action has its own field_type.
+ * 2) After selecting an action, show a chips input to capture action values.
+ * 3) Replace request payload "action_id": [...] with "applicableActions": [
+ *      { id, field_type, values: [FieldType] }
+ *    ]
+ *
+ * FieldType (backend):
+ *  {
+ *    type: DataTypeEnums.Type,
+ *    stringValue, boolValue, localDate, localDateTime, localTime, doubleValue, intValue
+ *  }
+ *
+ * Notes:
+ * - listActionsApi response uses: field_type, default_values, field_name, id
+ * - We use action.field_type to decide input type and how to serialize chip values.
+ */
+
 function useDebouncedValue(value, delayMs) {
     const [debounced, setDebounced] = useState(value);
     useEffect(() => {
@@ -17,17 +37,41 @@ function useDebouncedValue(value, delayMs) {
     return debounced;
 }
 
-// ---- helpers for Field values -> usable label/value ----
+function toDataType(valueType) {
+    return String(valueType || "").toUpperCase();
+}
+
+function getActionLabel(a) {
+    return (
+        a?.field_name ||
+        a?.fieldName ||
+        a?.name ||
+        a?.field ||
+        a?.comment ||
+        a?.id ||
+        "—"
+    );
+}
+
+function getWebhookLabel(w) {
+    return w?.name || w?.id || "—";
+}
+
+function getSmtpLabel(s) {
+    return s?.config_name || s?.configName || s?.mail_username || s?.id || "—";
+}
+
 function getFieldValueLabel(v) {
     if (v == null) return "";
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
-
-    // your values format examples: { localDate, type }, maybe { localDateTime }, { time }, etc
     if (v.localDate) return v.localDate;
     if (v.localDateTime) return v.localDateTime;
     if (v.time) return v.time;
-    if (v.value != null) return String(v.value);
-
+    if (v.intValue != null) return String(v.intValue);
+    if (v.doubleValue != null) return String(v.doubleValue);
+    if (v.stringValue != null) return String(v.stringValue);
+    if (v.boolValue != null) return String(v.boolValue);
+    if (v.booleanValue != null) return String(v.booleanValue);
     try {
         return JSON.stringify(v);
     } catch {
@@ -36,45 +80,69 @@ function getFieldValueLabel(v) {
 }
 
 function normalizeFieldValueKey(v) {
-    // stable key for selecting/multi-select
     if (v == null) return "";
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
     if (v.localDate) return `DATE:${v.localDate}`;
     if (v.localDateTime) return `DATETIME:${v.localDateTime}`;
     if (v.time) return `TIME:${v.time}`;
-    if (v.value != null) return `VAL:${String(v.value)}`;
+    if (v.localTime) return `TIME:${v.localTime}`;
+    if (v.intValue != null) return `INT:${v.intValue}`;
+    if (v.doubleValue != null) return `DOUBLE:${v.doubleValue}`;
+    if (v.stringValue != null) return `STRING:${v.stringValue}`;
+    if (v.boolValue != null) return `BOOLEAN:${v.boolValue}`;
+    if (v.booleanValue != null) return `BOOLEAN:${v.booleanValue}`;
     return `JSON:${getFieldValueLabel(v)}`;
 }
 
-// ---- condition row shape ----
-// valueMode: "PICKLIST" (use field.values multi-select) | "INPUT" (manual)
-// valueInputType: DATE/DATETIME/TIME/INT/DOUBLE/BOOLEAN/STRING
+function parseNormalizedKeyToFieldType(key) {
+    // key like: "INT:20", "DATE:2026-01-12", "STRING:abc", "BOOLEAN:true"
+    const idx = key.indexOf(":");
+    if (idx <= 0) return null;
+    const type = key.slice(0, idx);
+    const raw = key.slice(idx + 1);
+
+    switch (type) {
+        case "INT":
+            return { type: "INT", intValue: Number(raw) };
+        case "DOUBLE":
+            return { type: "DOUBLE", doubleValue: Number(raw) };
+        case "STRING":
+            return { type: "STRING", stringValue: raw };
+        case "BOOLEAN":
+            return { type: "BOOLEAN", boolValue: raw === "true" };
+        case "DATE":
+            return { type: "DATE", localDate: raw };
+        case "DATETIME":
+            return { type: "DATETIME", localDateTime: raw };
+        case "TIME":
+            return { type: "TIME", localTime: raw };
+        default:
+            return { type: "STRING", stringValue: raw };
+    }
+}
+
 function makeConditionRow() {
     return {
         fieldId: "",
         fieldName: "",
-        fieldType: "", // value_type
+        fieldType: "",
         operator: "",
-        // for picklist:
-        selectedValueKeys: [], // multi-select keys
-        // for manual entry:
-        inputValue: ""
+        selectedValueKeys: []
     };
 }
 
-// ---- action row shape ----
 function makeActionRow() {
     return {
         actionId: "",
         actionName: "",
-        // optional: allow selecting values for action if you want later
-        actionValues: [] // multi-select of action default_values (if any)
+        actionFieldType: "",
+        selectedValueKeys: [] // <-- chips for action values
     };
 }
 
 export default function RuleBuilder({ mode }) {
     const nav = useNavigate();
-    const { id } = useParams(); // rule id for edit
+    const { id } = useParams();
 
     const isCreate = mode === "create";
     const isEdit = mode === "edit";
@@ -99,59 +167,68 @@ export default function RuleBuilder({ mode }) {
     const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
     const lastGroupReqId = useRef(0);
 
-    // meta-data for operators/fields/actions
+    // meta-data for operators/fields/actions/webhooks/smtp
     const [metaLoading, setMetaLoading] = useState(true);
     const [typeOperatorMapping, setTypeOperatorMapping] = useState({});
     const [fields, setFields] = useState([]);
     const [actionsList, setActionsList] = useState([]);
+    const [webhooksList, setWebhooksList] = useState([]);
+    const [smtpList, setSmtpList] = useState([]);
 
     // IF blocks
     const [allConditions, setAllConditions] = useState([makeConditionRow()]);
     const [anyConditions, setAnyConditions] = useState([makeConditionRow()]);
 
-    // THEN actions
+    // THEN: actions + webhook + smtp
     const [actions, setActions] = useState([makeActionRow()]);
+    const [webhookId, setWebhookId] = useState("");
+    const [smtpId, setSmtpId] = useState("");
+    const [smtpRecipientsText, setSmtpRecipientsText] = useState("");
+    const [smtpSubject, setSmtpSubject] = useState("");
+    const [smtpBody, setSmtpBody] = useState("");
 
     const fieldsById = useMemo(() => new Map(fields.map((f) => [f.id, f])), [fields]);
     const actionsById = useMemo(() => new Map(actionsList.map((a) => [a.id, a])), [actionsList]);
 
-    const canSubmit = useMemo(() => {
-        return (isCreate ? ruleId.trim() : true) && groupId.trim() && ruleName.trim();
-    }, [groupId, isCreate, ruleId, ruleName]);
+    const canSubmit = useMemo(() => groupId.trim() && ruleName.trim(), [groupId, ruleName]);
 
-    // Load meta: fields + actions + operator mapping
+    // Load meta
     useEffect(() => {
         (async () => {
             setErr("");
             setMetaLoading(true);
             try {
-                const [metaRes, fieldsRes, actionsRes] = await Promise.all([
+                const [metaRes, fieldsRes, actionsRes, webhooksRes, smtpRes] = await Promise.all([
                     listDefaultValuesMeta(),
                     listFieldsApi(),
-                    listActionsApi()
+                    listActionsApi(),
+                    listWebhooksApi(),
+                    listSmtpConfigsApi()
                 ]);
 
-                // default values meta
                 const mapping = metaRes?.type_operator_mapping || metaRes?.data?.type_operator_mapping || {};
                 setTypeOperatorMapping(mapping);
 
-                // fields
                 const fieldsList = Array.isArray(fieldsRes) ? fieldsRes : fieldsRes?.data ?? [];
-                // only ACTIVE ones
                 setFields(fieldsList.filter((f) => (f.db_status || "").toUpperCase() === "ACTIVE" || !f.db_status));
 
-                // actions
                 const acts = Array.isArray(actionsRes) ? actionsRes : actionsRes?.data ?? [];
                 setActionsList(acts.filter((a) => (a.db_status || "").toUpperCase() === "ACTIVE" || !a.db_status));
+
+                const wh = Array.isArray(webhooksRes) ? webhooksRes : webhooksRes?.data ?? [];
+                setWebhooksList(wh);
+
+                const sm = Array.isArray(smtpRes) ? smtpRes : smtpRes?.data ?? [];
+                setSmtpList(sm);
             } catch (e) {
-                setErr(e?.response?.data?.message || e.message || "Failed to load fields/actions/operators");
+                setErr(e?.response?.data?.message || e.message || "Failed to load meta data");
             } finally {
                 setMetaLoading(false);
             }
         })();
     }, []);
 
-    // Load rule if edit
+    // Load rule in edit (best-effort mapping)
     useEffect(() => {
         if (!isEdit) return;
 
@@ -169,20 +246,68 @@ export default function RuleBuilder({ mode }) {
                 setLogicalOperator(r.logica_Operator || "AND");
                 setDescription(r.description || "");
 
-                // TODO: map backend r.field_operator_values / r.action_id into UI rows.
-                // For now keep one empty row each.
-                setAllConditions([makeConditionRow()]);
-                setAnyConditions([makeConditionRow()]);
-                setActions([makeActionRow()]);
+                setWebhookId(r.webhook_id || "");
+                setSmtpId(r.smtp_details?.id || "");
+                setSmtpRecipientsText((r.smtp_details?.recipient_ids || []).join(", "));
+                setSmtpSubject(r.smtp_details?.subject || "");
+                setSmtpBody(r.smtp_details?.body || "");
+
+                const allBlock = Array.isArray(r.conditions) ? r.conditions.find((c) => (c.logica_Operator || "").toUpperCase() === "AND") : null;
+                const anyBlock = Array.isArray(r.conditions) ? r.conditions.find((c) => (c.logica_Operator || "").toUpperCase() === "OR") : null;
+
+                setAllConditions(mapBackendBlockToRows(allBlock, fieldsById));
+                setAnyConditions(mapBackendBlockToRows(anyBlock, fieldsById));
+
+                // New: applicableActions support (if backend sends it)
+                if (Array.isArray(r.applicableActions) && r.applicableActions.length) {
+                    setActions(
+                        r.applicableActions.map((aa) => ({
+                            actionId: aa.id || "",
+                            actionName: "",
+                            actionFieldType: aa.field_type || "",
+                            selectedValueKeys: (aa.values || []).map(normalizeFieldValueKey).filter(Boolean)
+                        }))
+                    );
+                } else {
+                    // fallback: old action_id if present
+                    setActions(
+                        Array.isArray(r.action_id) && r.action_id.length
+                            ? r.action_id.map((aid) => ({ actionId: aid, actionName: "", actionFieldType: "", selectedValueKeys: [] }))
+                            : [makeActionRow()]
+                    );
+                }
             } catch (e) {
                 setErr(e?.response?.data?.message || e.message || "Failed to load rule");
             } finally {
                 setLoading(false);
             }
         })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id, isEdit]);
 
-    // Fetch groups by name prefix (>=4)
+    function mapBackendBlockToRows(block, fieldsByIdMap) {
+        const fovs = block?.field_operator_values;
+        if (!Array.isArray(fovs) || fovs.length === 0) return [makeConditionRow()];
+
+        return fovs.map((fov) => {
+            const fieldId = fov.field_id || "";
+            const field = fieldsByIdMap?.get ? fieldsByIdMap.get(fieldId) : null;
+            const fieldType = field?.value_type || fov.data_type || "";
+            const operator = fov.operator || "";
+            const dvs = Array.isArray(fov.default_values) ? fov.default_values : [];
+            const selectedValueKeys = dvs.map(normalizeFieldValueKey).filter(Boolean);
+
+            return {
+                fieldId,
+                fieldName: field?.name || "",
+                fieldType: toDataType(fieldType),
+                operator,
+                selectedValueKeys
+            };
+        });
+    }
+
+    // Group autocomplete
     useEffect(() => {
         const q = (debouncedGroupQuery || "").trim();
         if (q.length < 4) {
@@ -201,7 +326,7 @@ export default function RuleBuilder({ mode }) {
                 if (reqId !== lastGroupReqId.current) return;
                 setGroupOptions(list);
                 setGroupDropdownOpen(true);
-            } catch (e) {
+            } catch {
                 if (reqId !== lastGroupReqId.current) return;
                 setGroupOptions([]);
                 setGroupDropdownOpen(false);
@@ -229,7 +354,6 @@ export default function RuleBuilder({ mode }) {
     function addAllCondition() {
         setAllConditions((prev) => [...prev, makeConditionRow()]);
     }
-
     function addAnyCondition() {
         setAnyConditions((prev) => [...prev, makeConditionRow()]);
     }
@@ -265,8 +389,7 @@ export default function RuleBuilder({ mode }) {
             fieldName: f?.name || "",
             fieldType: valueType,
             operator: defaultOp,
-            selectedValueKeys: [],
-            inputValue: ""
+            selectedValueKeys: []
         });
     }
 
@@ -274,55 +397,128 @@ export default function RuleBuilder({ mode }) {
         updateCondition(setter, idx, { operator: op });
     }
 
-    function togglePickValue(setter, idx, key) {
-        setter((prev) =>
-            prev.map((row, i) => {
-                if (i !== idx) return row;
-                const set = new Set(row.selectedValueKeys || []);
-                if (set.has(key)) set.delete(key);
-                else set.add(key);
-                return { ...row, selectedValueKeys: Array.from(set) };
-            })
-        );
-    }
-
-    function setManualValue(setter, idx, value) {
-        updateCondition(setter, idx, { inputValue: value });
+    function setConditionChips(setter, idx, keys) {
+        updateCondition(setter, idx, { selectedValueKeys: keys });
     }
 
     function onActionSelect(idx, actionId) {
         const a = actionsById.get(actionId);
         updateAction(idx, {
             actionId,
-            actionName: a?.field || a?.name || "",
-            actionValues: [] // you can allow selecting values later
+            actionName: getActionLabel(a),
+            actionFieldType: a?.field_type || a?.fieldType || "",
+            selectedValueKeys: [] // reset values when action changes
         });
+    }
+
+    function setActionChips(idx, keys) {
+        updateAction(idx, { selectedValueKeys: keys });
+    }
+
+    function buildFieldOperatorValue(row) {
+        const f = row.fieldId ? fieldsById.get(row.fieldId) : null;
+        const dataType = toDataType(row.fieldType || f?.value_type || "");
+
+        return {
+            field_id: row.fieldId,
+            data_type: dataType,
+            operator: row.operator,
+            default_values: (row.selectedValueKeys || [])
+                .map(parseNormalizedKeyToFieldType)
+                .filter(Boolean)
+        };
+    }
+
+    function buildApplicableAction(row) {
+        const a = row.actionId ? actionsById.get(row.actionId) : null;
+        const fieldType = toDataType(row.actionFieldType || a?.field_type || a?.fieldType || "");
+
+        return {
+            id: row.actionId,
+            field_type: fieldType,
+            values: (row.selectedValueKeys || [])
+                .map(parseNormalizedKeyToFieldType)
+                .filter(Boolean)
+        };
+    }
+
+    function validateConditionsBlock(rows, label) {
+        for (const [i, r] of rows.entries()) {
+            if (!r.fieldId) return `${label}: field is required (row ${i + 1})`;
+            if (!r.operator) return `${label}: operator is required (row ${i + 1})`;
+            if (!Array.isArray(r.selectedValueKeys) || r.selectedValueKeys.length === 0) {
+                return `${label}: select/enter at least one value (row ${i + 1})`;
+            }
+        }
+        return "";
+    }
+
+    function validateActions() {
+        for (const [i, a] of actions.entries()) {
+            if (!a.actionId) return `Actions: action is required (row ${i + 1})`;
+            // If action has a field_type, require at least 1 value (you can relax this if needed)
+            const ft = toDataType(a.actionFieldType || (actionsById.get(a.actionId)?.field_type ?? ""));
+            if (ft && (!Array.isArray(a.selectedValueKeys) || a.selectedValueKeys.length === 0)) {
+                return `Actions: enter/select value(s) for "${a.actionName || a.actionId}" (row ${i + 1})`;
+            }
+        }
+        return "";
     }
 
     async function onSave() {
         setErr("");
         setSaving(true);
         try {
-            // TODO: map allConditions/anyConditions/actions to backend schema
+            if (!groupId.trim()) throw new Error("group_id is required");
+            if (!ruleName.trim()) throw new Error("rule_name is required");
+
+            const v1 = validateConditionsBlock(allConditions, "ALL block");
+            if (v1) throw new Error(v1);
+            const v2 = validateConditionsBlock(anyConditions, "ANY block");
+            if (v2) throw new Error(v2);
+
+            const v3 = validateActions();
+            if (v3) throw new Error(v3);
+
+            const allFov = allConditions.map(buildFieldOperatorValue);
+            const anyFov = anyConditions.map(buildFieldOperatorValue);
+
+            const applicableActions = actions
+                .filter((a) => a.actionId)
+                .map(buildApplicableAction);
+
             const payload = {
-                id: isCreate ? ruleId.trim() : id,
+                ...(isEdit ? { id } : ruleId.trim() ? { id: ruleId.trim() } : {}),
                 group_id: groupId.trim(),
                 rule_name: ruleName.trim(),
                 priority: Number(priority),
                 logica_Operator: logicalOperator,
-                description: description.trim(),
-                status: "ACTIVE",
-                version: 1,
 
-                conditions: [],
-                field_operator_values: [],
-                action_id: actions.map((a) => a.actionId).filter(Boolean),
-                actions: []
+                conditions: [
+                    { logica_Operator: "AND", field_operator_values: allFov },
+                    { logica_Operator: "OR", field_operator_values: anyFov }
+                ],
+
+                // ✅ NEW FIELD instead of action_id
+                applicableActions,
+
+                webhook_id: webhookId || undefined,
+
+                smtp_details:
+                    smtpId || smtpRecipientsText.trim() || smtpSubject.trim() || smtpBody.trim()
+                        ? {
+                            id: smtpId,
+                            recipient_ids: smtpRecipientsText
+                                .split(",")
+                                .map((s) => s.trim())
+                                .filter(Boolean),
+                            subject: smtpSubject,
+                            body: smtpBody
+                        }
+                        : undefined,
+
+                description: description.trim()
             };
-
-            if (!payload.group_id) throw new Error("group_id is required");
-            if (!payload.rule_name) throw new Error("rule_name is required");
-            if (!payload.id) throw new Error("id is required");
 
             if (isCreate) await createRuleApi(payload);
             else await updateRuleApi(payload);
@@ -350,6 +546,18 @@ export default function RuleBuilder({ mode }) {
         } finally {
             setSaving(false);
         }
+    }
+
+    function buildFieldChipsOptions(field) {
+        const values = field?.values || [];
+        return values.map((v) => ({ value: normalizeFieldValueKey(v), label: getFieldValueLabel(v) }));
+    }
+
+    function buildActionChipsOptions(actionObj) {
+        // if backend provides default_values for actions, use it as picklist
+        const values = actionObj?.default_values || actionObj?.defaultValues || [];
+        if (!Array.isArray(values) || values.length === 0) return [];
+        return values.map((v) => ({ value: normalizeFieldValueKey(v), label: getFieldValueLabel(v) }));
     }
 
     return (
@@ -383,16 +591,12 @@ export default function RuleBuilder({ mode }) {
             ) : null}
 
             <div className="card">
+                {/* ---- TOP META ---- */}
                 <div className="rbMeta">
                     <div className="rbMetaGrid">
                         <label className="field">
-                            <span className="label">Rule ID</span>
-                            <input
-                                className="input"
-                                value={isEdit ? id || "" : ruleId}
-                                onChange={(e) => setRuleId(e.target.value)}
-                                disabled={isEdit}
-                            />
+                            <span className="label">Rule ID (optional for create)</span>
+                            <input className="input" value={isEdit ? id || "" : ruleId} onChange={(e) => setRuleId(e.target.value)} disabled={isEdit} />
                         </label>
 
                         {/* Group autocomplete */}
@@ -412,9 +616,7 @@ export default function RuleBuilder({ mode }) {
                                     onFocus={() => {
                                         if ((groupOptions || []).length) setGroupDropdownOpen(true);
                                     }}
-                                    onBlur={() => {
-                                        setTimeout(() => setGroupDropdownOpen(false), 150);
-                                    }}
+                                    onBlur={() => setTimeout(() => setGroupDropdownOpen(false), 150)}
                                 />
 
                                 {groupId ? (
@@ -466,14 +668,6 @@ export default function RuleBuilder({ mode }) {
                             <input className="input" type="number" min={1} value={priority} onChange={(e) => setPriority(e.target.value)} />
                         </label>
 
-                        <label className="field">
-                            <span className="label">Logical Operator</span>
-                            <select className="input" value={logicalOperator} onChange={(e) => setLogicalOperator(e.target.value)}>
-                                <option value="AND">AND</option>
-                                <option value="OR">OR</option>
-                            </select>
-                        </label>
-
                         <label className="field rbMetaDesc">
                             <span className="label">Description</span>
                             <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -481,7 +675,7 @@ export default function RuleBuilder({ mode }) {
                     </div>
                 </div>
 
-                {/* IF */}
+                {/* ---- IF ---- */}
                 <div className="rbSection">
                     <div className="rbSectionTitle">IF</div>
 
@@ -492,12 +686,10 @@ export default function RuleBuilder({ mode }) {
                             const f = row.fieldId ? fieldsById.get(row.fieldId) : null;
                             const fType = row.fieldType || f?.value_type || "";
                             const ops = typeOperatorMapping?.[fType] || [];
-                            const values = f?.values || [];
-                            const usePickList = Array.isArray(values) && values.length > 0;
+                            const usePickList = Array.isArray(f?.values) && f.values.length > 0;
 
                             return (
                                 <div key={idx} className="condRow4">
-                                    {/* Field */}
                                     <select className="input" value={row.fieldId} onChange={(e) => onFieldChange(setAllConditions, idx, e.target.value)}>
                                         <option value="">Select field</option>
                                         {fields.map((ff) => (
@@ -507,53 +699,28 @@ export default function RuleBuilder({ mode }) {
                                         ))}
                                     </select>
 
-                                    {/* Operator */}
                                     <select className="input" value={row.operator} onChange={(e) => onOperatorChange(setAllConditions, idx, e.target.value)} disabled={!row.fieldId}>
                                         <option value="">{row.fieldId ? "Select operator" : "Select field first"}</option>
                                         {ops.map((op) => (
-                                            <option key={op} value={op}>
-                                                {op}
-                                            </option>
+                                            <option key={op} value={op}>{op}</option>
                                         ))}
                                     </select>
 
-                                    {/* Value */}
-                                    {usePickList ? (
-                                        <div className="pickMulti">
-                                            <div className="pickHead">Select values</div>
-                                            <div className="pickBox">
-                                                {values.map((v) => {
-                                                    const key = normalizeFieldValueKey(v);
-                                                    const label = getFieldValueLabel(v);
-                                                    const checked = (row.selectedValueKeys || []).includes(key);
-                                                    return (
-                                                        <label key={key} className="pickItem">
-                                                            <input type="checkbox" checked={checked} onChange={() => togglePickValue(setAllConditions, idx, key)} />
-                                                            <span>{label}</span>
-                                                        </label>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <ValueInput
-                                            valueType={fType}
-                                            value={row.inputValue}
-                                            onChange={(v) => setManualValue(setAllConditions, idx, v)}
-                                            disabled={!row.fieldId}
-                                        />
-                                    )}
+                                    <ChipsValueBox
+                                        disabled={!row.fieldId}
+                                        mode={usePickList ? "PICKLIST" : "FREE_TEXT"}
+                                        options={usePickList ? buildFieldChipsOptions(f) : []}
+                                        valueKeys={row.selectedValueKeys}
+                                        onChange={(keys) => setConditionChips(setAllConditions, idx, keys)}
+                                        valueType={fType}
+                                    />
 
-                                    <button className="xBtn" type="button" onClick={() => removeCondition(setAllConditions, idx)} title="Remove">
-                                        ×
-                                    </button>
+                                    <button className="xBtn" type="button" onClick={() => removeCondition(setAllConditions, idx)} title="Remove">×</button>
                                 </div>
                             );
                         })}
 
-                        <button className="addLink" type="button" onClick={addAllCondition}>
-                            + Add Condition
-                        </button>
+                        <button className="addLink" type="button" onClick={addAllCondition}>+ Add Condition</button>
                     </div>
 
                     <div className="andBar">AND</div>
@@ -565,8 +732,7 @@ export default function RuleBuilder({ mode }) {
                             const f = row.fieldId ? fieldsById.get(row.fieldId) : null;
                             const fType = row.fieldType || f?.value_type || "";
                             const ops = typeOperatorMapping?.[fType] || [];
-                            const values = f?.values || [];
-                            const usePickList = Array.isArray(values) && values.length > 0;
+                            const usePickList = Array.isArray(f?.values) && f.values.length > 0;
 
                             return (
                                 <div key={idx} className="condRow4">
@@ -582,100 +748,140 @@ export default function RuleBuilder({ mode }) {
                                     <select className="input" value={row.operator} onChange={(e) => onOperatorChange(setAnyConditions, idx, e.target.value)} disabled={!row.fieldId}>
                                         <option value="">{row.fieldId ? "Select operator" : "Select field first"}</option>
                                         {ops.map((op) => (
-                                            <option key={op} value={op}>
-                                                {op}
-                                            </option>
+                                            <option key={op} value={op}>{op}</option>
                                         ))}
                                     </select>
 
-                                    {usePickList ? (
-                                        <div className="pickMulti">
-                                            <div className="pickHead">Select values</div>
-                                            <div className="pickBox">
-                                                {values.map((v) => {
-                                                    const key = normalizeFieldValueKey(v);
-                                                    const label = getFieldValueLabel(v);
-                                                    const checked = (row.selectedValueKeys || []).includes(key);
-                                                    return (
-                                                        <label key={key} className="pickItem">
-                                                            <input type="checkbox" checked={checked} onChange={() => togglePickValue(setAnyConditions, idx, key)} />
-                                                            <span>{label}</span>
-                                                        </label>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <ValueInput
-                                            valueType={fType}
-                                            value={row.inputValue}
-                                            onChange={(v) => setManualValue(setAnyConditions, idx, v)}
-                                            disabled={!row.fieldId}
-                                        />
-                                    )}
+                                    <ChipsValueBox
+                                        disabled={!row.fieldId}
+                                        mode={usePickList ? "PICKLIST" : "FREE_TEXT"}
+                                        options={usePickList ? buildFieldChipsOptions(f) : []}
+                                        valueKeys={row.selectedValueKeys}
+                                        onChange={(keys) => setConditionChips(setAnyConditions, idx, keys)}
+                                        valueType={fType}
+                                    />
 
-                                    <button className="xBtn" type="button" onClick={() => removeCondition(setAnyConditions, idx)} title="Remove">
-                                        ×
-                                    </button>
+                                    <button className="xBtn" type="button" onClick={() => removeCondition(setAnyConditions, idx)} title="Remove">×</button>
                                 </div>
                             );
                         })}
 
-                        <button className="addLink" type="button" onClick={addAnyCondition}>
-                            + Add Condition
-                        </button>
+                        <button className="addLink" type="button" onClick={addAnyCondition}>+ Add Condition</button>
                     </div>
                 </div>
 
-                {/* THEN */}
+                {/* ---- THEN ---- */}
                 <div className="rbSection">
                     <div className="rbSectionTitle">THEN</div>
 
                     <div className="block">
-                        <div className="blockTitle">Perform the following actions:</div>
+                        {/* Webhook */}
+                        <div className="block" style={{ backgroundColor: "#f9f9f9" }}>
+                            <div className="blockTitle">Webhook Info</div>
+                            <div className="thenGrid">
+                                <label className="field thenSpan2">
+                                    <span className="label">Webhook</span>
+                                    <select className="input" value={webhookId} onChange={(e) => setWebhookId(e.target.value)}>
+                                        <option value="">None</option>
+                                        {webhooksList.map((w) => (
+                                            <option key={w.id} value={w.id}>{getWebhookLabel(w)}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
 
-                        {actions.map((a, idx) => {
-                            const actionObj = a.actionId ? actionsById.get(a.actionId) : null;
-                            const actionName = actionObj?.field || actionObj?.name || a.actionName || "";
+                        {/* SMTP */}
+                        <div className="block" style={{ marginTop: "16px", backgroundColor: "#f9f9f9" }}>
+                            <div className="blockTitle">Send Mail Info</div>
+                            <div className="thenGrid">
+                                <label className="field thenSpan2">
+                                    <span className="label">SMTP Server</span>
+                                    <select className="input" value={smtpId} onChange={(e) => setSmtpId(e.target.value)}>
+                                        <option value="">None</option>
+                                        {smtpList.map((s) => (
+                                            <option key={s.id} value={s.id}>{getSmtpLabel(s)}</option>
+                                        ))}
+                                    </select>
+                                </label>
 
-                            return (
-                                <div key={idx} className="actionBox">
-                                    <div className="actionRow2">
-                                        <div className="actionLabel">Action:</div>
+                                <label className="field thenSpan2">
+                                    <span className="label">Recipient Ids (comma separated)</span>
+                                    <input className="input" value={smtpRecipientsText} onChange={(e) => setSmtpRecipientsText(e.target.value)} placeholder="user1@example.com, user2@example.com" />
+                                </label>
 
-                                        <select className="input" value={a.actionId} onChange={(e) => onActionSelect(idx, e.target.value)}>
-                                            <option value="">Select action</option>
-                                            {actionsList.map((x) => (
-                                                <option key={x.id} value={x.id}>
-                                                    {x.field || x.name}
-                                                </option>
-                                            ))}
-                                        </select>
+                                <label className="field">
+                                    <span className="label">Subject</span>
+                                    <input className="input" value={smtpSubject} onChange={(e) => setSmtpSubject(e.target.value)} placeholder="Notification" />
+                                </label>
 
-                                        <button className="xBtn" type="button" onClick={() => removeAction(idx)} title="Remove">
-                                            ×
-                                        </button>
-                                    </div>
+                                <label className="field thenSpan2">
+                                    <span className="label">Mail Body</span>
+                                    <input className="input" value={smtpBody} onChange={(e) => setSmtpBody(e.target.value)} placeholder="Rule triggered" />
+                                </label>
+                            </div>
+                        </div>
 
-                                    {a.actionId ? (
-                                        <div className="actionHint">
-                                            Selected: <b>{actionName}</b> • ID: <span className="rbMono">{a.actionId}</span>
+                        {/* Actions + action values */}
+                        <div className="block" style={{ marginTop: "16px", backgroundColor: "#f9f9f9" }}>
+                            <div className="blockTitle">Actions</div>
+
+                            {actions.map((a, idx) => {
+                                const actionObj = a.actionId ? actionsById.get(a.actionId) : null;
+                                const actionName = getActionLabel(actionObj) || a.actionName || "";
+                                const actionType = toDataType(a.actionFieldType || actionObj?.field_type || actionObj?.fieldType || "");
+
+                                const pickOptions = buildActionChipsOptions(actionObj);
+                                const actionUsePickList = pickOptions.length > 0;
+
+                                return (
+                                    <div key={idx} className="actionBox">
+                                        <div className="actionRow2">
+                                            <div className="actionLabel">Action:</div>
+
+                                            <select className="input" value={a.actionId} onChange={(e) => onActionSelect(idx, e.target.value)}>
+                                                <option value="">Select action</option>
+                                                {actionsList.map((x) => (
+                                                    <option key={x.id} value={x.id}>
+                                                        {getActionLabel(x)} ({toDataType(x.field_type || x.fieldType)})
+                                                    </option>
+                                                ))}
+                                            </select>
+
+                                            <button className="xBtn" type="button" onClick={() => removeAction(idx)} title="Remove">×</button>
                                         </div>
-                                    ) : null}
-                                </div>
-                            );
-                        })}
 
-                        <button className="addLink" type="button" onClick={addActionRow}>
-                            + Add Action
-                        </button>
+                                        {a.actionId ? (
+                                            <>
+                                                <div className="actionHint">
+                                                    Selected: <b>{actionName}</b> • Type: <b>{actionType || "—"}</b> • ID:{" "}
+                                                    <span className="rbMono">{a.actionId}</span>
+                                                </div>
+
+                                                <div className="actionValues">
+                                                    <div className="label">Action values</div>
+                                                    <ChipsValueBox
+                                                        disabled={false}
+                                                        mode={actionUsePickList ? "PICKLIST" : "FREE_TEXT"}
+                                                        options={pickOptions}
+                                                        valueKeys={a.selectedValueKeys}
+                                                        onChange={(keys) => setActionChips(idx, keys)}
+                                                        valueType={actionType || "STRING"}
+                                                    />
+                                                </div>
+                                            </>
+                                        ) : null}
+                                    </div>
+                                );
+                            })}
+
+                            <button className="addLink" type="button" onClick={addActionRow}>+ Add Action</button>
+                        </div>
                     </div>
                 </div>
 
                 <div className="rbBottom">
-                    <button className="btnSecondary" type="button" onClick={() => nav(-1)} disabled={saving}>
-                        Cancel
-                    </button>
+                    <button className="btnSecondary" type="button" onClick={() => nav(-1)} disabled={saving}>Cancel</button>
                     <button className="btnPrimary" type="button" onClick={onSave} disabled={!canSubmit || saving}>
                         {saving ? "Saving..." : "Save Rule"}
                     </button>
@@ -685,35 +891,106 @@ export default function RuleBuilder({ mode }) {
     );
 }
 
-function ValueInput({ valueType, value, onChange, disabled }) {
-    const type = (valueType || "").toUpperCase();
+/**
+ * ChipsValueBox:
+ * - PICKLIST: dropdown + chips
+ * - FREE_TEXT: input + chips (press Enter)
+ * Stored values are normalized as "TYPE:value" so we can convert to FieldType objects.
+ */
+function ChipsValueBox({ mode, options, valueKeys, onChange, disabled, valueType }) {
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
+    const [text, setText] = useState("");
 
-    if (type === "DATE") {
-        return <input className="input" type="date" value={value || ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} />;
+    const selectedSet = useMemo(() => new Set(valueKeys || []), [valueKeys]);
+
+    const filteredOptions = useMemo(() => {
+        if (mode !== "PICKLIST") return [];
+        const q = query.trim().toLowerCase();
+        if (!q) return options;
+        return options.filter((o) => (o.label || "").toLowerCase().includes(q));
+    }, [mode, options, query]);
+
+    function removeKey(k) {
+        onChange((valueKeys || []).filter((x) => x !== k));
     }
 
-    if (type === "DATETIME") {
-        return <input className="input" type="datetime-local" value={value || ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} />;
+    function addKey(k) {
+        if (!k) return;
+        const next = new Set(valueKeys || []);
+        next.add(k);
+        onChange(Array.from(next));
     }
 
-    if (type === "TIME") {
-        return <input className="input" type="time" value={value || ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} />;
+    function addFreeTextValue(raw) {
+        const v = String(raw || "").trim();
+        if (!v) return;
+        const type = toDataType(valueType || "STRING");
+        addKey(`${type}:${v}`);
+        setText("");
     }
 
-    if (type === "INT" || type === "DOUBLE") {
-        return <input className="input" type="number" value={value || ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} />;
-    }
+    return (
+        <div className={`chipsBox ${disabled ? "chipsBox--disabled" : ""}`}>
+            <div className="chipsTop">
+                <div className="chipsList">
+                    {(valueKeys || []).map((k) => (
+                        <span key={k} className="chip">
+              <span className="chipText">{k.includes(":") ? k.split(":").slice(1).join(":") : k}</span>
+              <button type="button" className="chipX" onClick={() => removeKey(k)} disabled={disabled}>
+                ×
+              </button>
+            </span>
+                    ))}
+                </div>
 
-    if (type === "BOOLEAN") {
-        return (
-            <select className="input" value={value || ""} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
-                <option value="">Select</option>
-                <option value="true">true</option>
-                <option value="false">false</option>
-            </select>
-        );
-    }
+                {mode === "PICKLIST" ? (
+                    <div className="chipsControls">
+                        <button type="button" className="chipsBtn" onClick={() => setOpen((s) => !s)} disabled={disabled}>
+                            Select values
+                        </button>
+                    </div>
+                ) : (
+                    <input
+                        className="chipsInput"
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                e.preventDefault();
+                                addFreeTextValue(text);
+                            }
+                        }}
+                        placeholder="Type value and press Enter"
+                        disabled={disabled}
+                    />
+                )}
+            </div>
 
-    // default STRING
-    return <input className="input" type="text" value={value || ""} onChange={(e) => onChange(e.target.value)} disabled={disabled} placeholder="Enter value" />;
+            {mode === "PICKLIST" && open && !disabled ? (
+                <div className="chipsDropdown" onMouseDown={(e) => e.preventDefault()}>
+                    <input className="chipsSearch" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search..." />
+                    <div className="chipsOptions">
+                        {filteredOptions.length === 0 ? (
+                            <div className="chipsEmpty">No values</div>
+                        ) : (
+                            filteredOptions.map((o) => {
+                                const picked = selectedSet.has(o.value);
+                                return (
+                                    <button
+                                        key={o.value}
+                                        type="button"
+                                        className={`chipsOption ${picked ? "chipsOption--picked" : ""}`}
+                                        onClick={() => addKey(o.value)}
+                                    >
+                                        {o.label}
+                                    </button>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+            ) : null}
+        </div>
+    );
 }
