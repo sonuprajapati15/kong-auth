@@ -13,7 +13,8 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: mypassword
     volumes:
       - auth_mongodb:/data/db
-
+    networks:
+      - kong-net
   kong-db:
     image: postgres:12
     container_name: kong-db
@@ -149,8 +150,8 @@ services:
     ports:
       - "9000:9000"
     depends_on:
-      kong:
-        condition: service_healthy
+      - auth_mongodb
+      - kong
     networks:
       - kong-net
 

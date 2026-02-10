@@ -2,7 +2,7 @@ import axios from "axios";
 import { clearAuth, getToken } from "../config/auth";
 
 export const auth_server = axios.create({
-    baseURL: import.meta.env.VITE_AUTH_SERVER_BASE_URL || "http://localhost:9000",
+    baseURL: import.meta.env.VITE_AUTH_SERVER_BASE_URL || "http://localhost:8000",
     headers: { "Content-Type": "application/json" }
 });
 
